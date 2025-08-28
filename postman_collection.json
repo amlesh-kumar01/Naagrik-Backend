@@ -1,0 +1,737 @@
+{
+  "info": {
+    "name": "Naagrik Backend API",
+    "description": "Complete API collection for Naagrik civic engagement platform",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "version": "1.0.0"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{authToken}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:5000",
+      "type": "string"
+    },
+    {
+      "key": "authToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "userId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "issueId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "commentId",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health Check",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/health",
+          "host": ["{{baseUrl}}"],
+          "path": ["health"]
+        },
+        "description": "Check if the API is running"
+      }
+    },
+    {
+      "name": "Authentication",
+      "item": [
+        {
+          "name": "Register",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    const response = pm.response.json();",
+                  "    pm.collectionVariables.set('authToken', response.token);",
+                  "    pm.collectionVariables.set('userId', response.user.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"test@example.com\",\n  \"password\": \"Password123\",\n  \"fullName\": \"Test User\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/register",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "auth", "register"]
+            }
+          }
+        },
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const response = pm.response.json();",
+                  "    pm.collectionVariables.set('authToken', response.token);",
+                  "    pm.collectionVariables.set('userId', response.user.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@naagrik.com\",\n  \"password\": \"admin123\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "auth", "login"]
+            }
+          }
+        },
+        {
+          "name": "Get Current User",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/me",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "auth", "me"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Issues",
+      "item": [
+        {
+          "name": "Get All Issues",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/issues?page=1&limit=10",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "issues"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                },
+                {
+                  "key": "status",
+                  "value": "OPEN",
+                  "disabled": true
+                },
+                {
+                  "key": "categoryId",
+                  "value": "1",
+                  "disabled": true
+                },
+                {
+                  "key": "search",
+                  "value": "road",
+                  "disabled": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Issue Categories",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/issues/categories",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "issues", "categories"]
+            }
+          }
+        },
+        {
+          "name": "Create Issue",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    const response = pm.response.json();",
+                  "    pm.collectionVariables.set('issueId', response.issue.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Broken streetlight on Park Avenue\",\n  \"description\": \"The streetlight has been broken for over a week, making the area unsafe at night. This needs immediate attention from the city maintenance team.\",\n  \"categoryId\": 3,\n  \"locationLat\": 12.9716,\n  \"locationLng\": 77.5946,\n  \"address\": \"Park Avenue, Bangalore, Karnataka\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/issues",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "issues"]
+            }
+          }
+        },
+        {
+          "name": "Get Issue by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/issues/{{issueId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "issues", "{{issueId}}"]
+            }
+          }
+        },
+        {
+          "name": "Vote on Issue",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"voteType\": 1\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/issues/{{issueId}}/vote",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "issues", "{{issueId}}", "vote"]
+            }
+          }
+        },
+        {
+          "name": "Update Issue Status (Steward/Admin)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"ACKNOWLEDGED\",\n  \"reason\": \"Issue has been reviewed and will be addressed by the maintenance team\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/issues/{{issueId}}/status",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "issues", "{{issueId}}", "status"]
+            }
+          }
+        },
+        {
+          "name": "Find Similar Issues",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"text\": \"broken streetlight safety night\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/issues/find-similar",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "issues", "find-similar"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Comments",
+      "item": [
+        {
+          "name": "Get Issue Comments",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/comments/issues/{{issueId}}/comments",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "comments", "issues", "{{issueId}}", "comments"]
+            }
+          }
+        },
+        {
+          "name": "Add Comment",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    const response = pm.response.json();",
+                  "    pm.collectionVariables.set('commentId', response.comment.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"content\": \"I have also noticed this issue in the area. It's been a safety concern for pedestrians.\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/comments/issues/{{issueId}}/comments",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "comments", "issues", "{{issueId}}", "comments"]
+            }
+          }
+        },
+        {
+          "name": "Update Comment",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"content\": \"Updated comment: I have also noticed this issue in the area and it affects the entire community.\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/comments/{{commentId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "comments", "{{commentId}}"]
+            }
+          }
+        },
+        {
+          "name": "Flag Comment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Inappropriate content\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/comments/{{commentId}}/flag",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "comments", "{{commentId}}", "flag"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Users",
+      "item": [
+        {
+          "name": "Get Leaderboard",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/leaderboard?page=1&limit=10",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "users", "leaderboard"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Search Users",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/search?q=test&limit=5",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "users", "search"],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "test"
+                },
+                {
+                  "key": "limit",
+                  "value": "5"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get User Profile",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/{{userId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "users", "{{userId}}"]
+            }
+          }
+        },
+        {
+          "name": "Get User Badges",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/{{userId}}/badges",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "users", "{{userId}}", "badges"]
+            }
+          }
+        },
+        {
+          "name": "Get User Stats",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/{{userId}}/stats",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "users", "{{userId}}", "stats"]
+            }
+          }
+        },
+        {
+          "name": "Update User Role (Admin)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"role\": \"STEWARD\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/users/{{userId}}/role",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "users", "{{userId}}", "role"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Stewards",
+      "item": [
+        {
+          "name": "Submit Steward Application",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"justification\": \"I have been an active community member for several years and have extensive experience in local governance. I believe I can contribute significantly to resolving civic issues in my area and help improve the overall quality of life for residents. My background in urban planning and previous volunteer work with the city council has given me valuable insights into civic administration.\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/stewards/applications",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "stewards", "applications"]
+            }
+          }
+        },
+        {
+          "name": "Get My Application",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/stewards/applications/me",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "stewards", "applications", "me"]
+            }
+          }
+        },
+        {
+          "name": "Get My Steward Zones",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/stewards/zones/me",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "stewards", "zones", "me"]
+            }
+          }
+        },
+        {
+          "name": "Add Steward Note",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"note\": \"Issue has been escalated to the maintenance department. Expected resolution within 48 hours. Contacted local contractor for emergency repair.\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/stewards/issues/{{issueId}}/notes",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "stewards", "issues", "{{issueId}}", "notes"]
+            }
+          }
+        },
+        {
+          "name": "Get Steward Notes",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/stewards/issues/{{issueId}}/notes",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "stewards", "issues", "{{issueId}}", "notes"]
+            }
+          }
+        },
+        {
+          "name": "Get My Steward Stats",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/stewards/stats/me",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "stewards", "stats", "me"]
+            }
+          }
+        },
+        {
+          "name": "Get Pending Applications (Admin)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/stewards/applications/pending",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "stewards", "applications", "pending"]
+            }
+          }
+        },
+        {
+          "name": "Review Application (Admin)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"APPROVED\",\n  \"feedback\": \"Application approved based on excellent community involvement and relevant experience.\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/stewards/applications/APPLICATION_ID/review",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "stewards", "applications", "APPLICATION_ID", "review"]
+            }
+          }
+        },
+        {
+          "name": "Get All Stewards (Admin)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/stewards",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "stewards"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Upload",
+      "item": [
+        {
+          "name": "Upload Profile Image",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "image",
+                  "type": "file",
+                  "src": ""
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/upload/profile",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "upload", "profile"]
+            }
+          }
+        },
+        {
+          "name": "Upload Issue Media",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "media",
+                  "type": "file",
+                  "src": ""
+                },
+                {
+                  "key": "media",
+                  "type": "file",
+                  "src": "",
+                  "disabled": true
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/upload/issue-media",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "upload", "issue-media"]
+            }
+          }
+        },
+        {
+          "name": "Delete Media",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"publicId\": \"CLOUDINARY_PUBLIC_ID\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/upload/media",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "upload", "media"]
+            }
+          }
+        },
+        {
+          "name": "Get Media Info",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/upload/media/CLOUDINARY_PUBLIC_ID",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "upload", "media", "CLOUDINARY_PUBLIC_ID"]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
