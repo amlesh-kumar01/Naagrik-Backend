@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const issueController = require('../controllers/issueController');
 const { authenticateToken, requireSteward, optionalAuth } = require('../middleware/auth');
-const { createIssueLimiter, voteLimiter } = require('../middleware/rateLimiter');
+const rateLimitService = require('../services/rateLimitService');
 const { handleValidationErrors } = require('../middleware/errors');
 const {
   createIssueValidation,
@@ -38,7 +38,7 @@ router.get('/:id/history',
 // Protected routes
 router.post('/', 
   authenticateToken,
-  createIssueLimiter,
+  rateLimitService.issueRateLimit(),
   createIssueValidation,
   handleValidationErrors,
   issueController.createIssue
@@ -53,7 +53,12 @@ router.post('/find-similar',
 
 router.post('/:issueId/vote', 
   authenticateToken,
-  voteLimiter,
+  rateLimitService.createMiddleware({
+    maxRequests: 100,
+    windowSeconds: 3600,
+    type: 'vote',
+    keyGenerator: (req) => req.user?.id || req.ip
+  }),
   voteValidation,
   handleValidationErrors,
   issueController.voteIssue

@@ -1,5 +1,6 @@
 const express = require('express');
 const { authenticateToken } = require('../middleware/auth');
+const rateLimitService = require('../services/rateLimitService');
 const {
   upload,
   uploadProfileImage,
@@ -12,21 +13,24 @@ const router = express.Router();
 
 // Upload profile image
 router.post('/profile', 
-  authenticateToken, 
+  authenticateToken,
+  rateLimitService.uploadRateLimit(),
   upload.single('image'), 
   uploadProfileImage
 );
 
 // Upload issue media (images and videos)
 router.post('/issue-media', 
-  authenticateToken, 
+  authenticateToken,
+  rateLimitService.uploadRateLimit(),
   upload.array('media', 5), 
   uploadIssueMedia
 );
 
 // Delete media
 router.delete('/media', 
-  authenticateToken, 
+  authenticateToken,
+  rateLimitService.uploadRateLimit(),
   deleteMedia
 );
 

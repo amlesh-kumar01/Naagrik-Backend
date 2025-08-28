@@ -2,20 +2,20 @@ const express = require('express');
 const router = express.Router();
 const authController = require('../controllers/authController');
 const { authenticateToken } = require('../middleware/auth');
-const { authLimiter } = require('../middleware/rateLimiter');
+const rateLimitService = require('../services/rateLimitService');
 const { handleValidationErrors } = require('../middleware/errors');
-const { registerValidation, loginValidation } = require('../middleware/validation');
+const { registerValidation, loginValidation, refreshTokenValidation } = require('../middleware/validation');
 
 // Public routes
 router.post('/register', 
-  authLimiter,
+  rateLimitService.authRateLimit(),
   registerValidation,
   handleValidationErrors,
   authController.register
 );
 
 router.post('/login', 
-  authLimiter,
+  rateLimitService.authRateLimit(),
   loginValidation,
   handleValidationErrors,
   authController.login
@@ -28,8 +28,15 @@ router.get('/me',
 );
 
 router.post('/refresh', 
-  authenticateToken,
+  rateLimitService.authRateLimit(),
+  refreshTokenValidation,
+  handleValidationErrors,
   authController.refreshToken
+);
+
+router.post('/logout', 
+  authenticateToken,
+  authController.logout
 );
 
 module.exports = router;

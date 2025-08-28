@@ -1,4 +1,5 @@
 const { query, transaction } = require('../config/database');
+const cacheService = require('./cacheService');
 const { hashPassword, comparePassword, sanitizeUser, calculateReputationChange } = require('../utils/helpers');
 
 const userService = {
@@ -30,12 +31,16 @@ const userService = {
 
   // Find user by ID
   async findById(id) {
-    const result = await query(
-      'SELECT id, email, full_name, role, reputation_score, created_at FROM users WHERE id = $1',
-      [id]
-    );
+    const cacheKey = cacheService.generateKey('user', id);
     
-    return result.rows[0] || null;
+    return await cacheService.cached(cacheKey, async () => {
+      const result = await query(
+        'SELECT id, email, full_name, role, reputation_score, created_at FROM users WHERE id = $1',
+        [id]
+      );
+      
+      return result.rows[0] || null;
+    }, 600); // Cache for 10 minutes
   },
 
   // Authenticate user
@@ -61,59 +66,97 @@ const userService = {
       [newReputation, userId]
     );
     
+    // Clear related caches
+    await this.clearUserCache(userId);
+    await this.clearLeaderboardCache();
+    
     return { change, newReputation: result.rows[0].reputation_score };
+  },
+
+  // Clear user cache
+  async clearUserCache(userId) {
+    const userKey = cacheService.generateKey('user', userId);
+    const badgesKey = cacheService.generateKey('user_badges', userId);
+    const statsKey = cacheService.generateKey('user_stats', userId);
+    
+    await Promise.all([
+      cacheService.del(userKey),
+      cacheService.del(badgesKey),
+      cacheService.del(statsKey)
+    ]);
+  },
+
+  // Clear leaderboard cache
+  async clearLeaderboardCache() {
+    // Since we can't use pattern deletion in Upstash, clear common limits
+    const limits = [10, 20, 50, 100];
+    const keys = limits.map(limit => cacheService.generateKey('leaderboard', limit));
+    
+    await Promise.all(keys.map(key => cacheService.del(key)));
   },
 
   // Get leaderboard
   async getLeaderboard(limit = 50) {
-    const result = await query(
-      `SELECT id, full_name, reputation_score, 
-              RANK() OVER (ORDER BY reputation_score DESC) as rank
-       FROM users 
-       WHERE role != 'SUPER_ADMIN'
-       ORDER BY reputation_score DESC 
-       LIMIT $1`,
-      [limit]
-    );
+    const cacheKey = cacheService.generateKey('leaderboard', limit);
     
-    return result.rows;
+    return await cacheService.cached(cacheKey, async () => {
+      const result = await query(
+        `SELECT id, full_name, reputation_score, 
+                RANK() OVER (ORDER BY reputation_score DESC) as rank
+         FROM users 
+         WHERE role != 'SUPER_ADMIN'
+         ORDER BY reputation_score DESC 
+         LIMIT $1`,
+        [limit]
+      );
+      
+      return result.rows;
+    }, 300); // Cache for 5 minutes
   },
 
   // Get user badges
   async getUserBadges(userId) {
-    const result = await query(
-      `SELECT b.id, b.name, b.description, b.icon_url, ub.earned_at
-       FROM user_badges ub
-       JOIN badges b ON ub.badge_id = b.id
-       WHERE ub.user_id = $1
-       ORDER BY ub.earned_at DESC`,
-      [userId]
-    );
+    const cacheKey = cacheService.generateKey('user_badges', userId);
     
-    return result.rows;
+    return await cacheService.cached(cacheKey, async () => {
+      const result = await query(
+        `SELECT b.id, b.name, b.description, b.icon_url, ub.earned_at
+         FROM user_badges ub
+         JOIN badges b ON ub.badge_id = b.id
+         WHERE ub.user_id = $1
+         ORDER BY ub.earned_at DESC`,
+        [userId]
+      );
+      
+      return result.rows;
+    }, 600); // Cache for 10 minutes
   },
 
   // Get user statistics
   async getUserStats(userId) {
-    const statsResult = await query(
-      `SELECT 
-         (SELECT COUNT(*) FROM issues WHERE user_id = $1) as issues_created,
-         (SELECT COUNT(*) FROM comments WHERE user_id = $1) as comments_made,
-         (SELECT COUNT(*) FROM issue_votes WHERE user_id = $1) as votes_cast,
-         (SELECT COUNT(*) FROM issues WHERE user_id = $1 AND status = 'RESOLVED') as issues_resolved
-       `,
-      [userId]
-    );
+    const cacheKey = cacheService.generateKey('user_stats', userId);
     
-    const badgesResult = await query(
-      'SELECT COUNT(*) as badges_earned FROM user_badges WHERE user_id = $1',
-      [userId]
-    );
-    
-    return {
-      ...statsResult.rows[0],
-      badges_earned: parseInt(badgesResult.rows[0].badges_earned)
-    };
+    return await cacheService.cached(cacheKey, async () => {
+      const statsResult = await query(
+        `SELECT 
+           (SELECT COUNT(*) FROM issues WHERE user_id = $1) as issues_created,
+           (SELECT COUNT(*) FROM comments WHERE user_id = $1) as comments_made,
+           (SELECT COUNT(*) FROM issue_votes WHERE user_id = $1) as votes_cast,
+           (SELECT COUNT(*) FROM issues WHERE user_id = $1 AND status = 'RESOLVED') as issues_resolved
+         `,
+        [userId]
+      );
+      
+      const badgesResult = await query(
+        'SELECT COUNT(*) as badges_earned FROM user_badges WHERE user_id = $1',
+        [userId]
+      );
+      
+      return {
+        ...statsResult.rows[0],
+        badges_earned: parseInt(badgesResult.rows[0].badges_earned)
+      };
+    }, 300); // Cache for 5 minutes
   },
 
   // Update user role

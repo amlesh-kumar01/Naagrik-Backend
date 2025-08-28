@@ -28,6 +28,13 @@ const loginValidation = [
     .withMessage('Password is required')
 ];
 
+const refreshTokenValidation = [
+  body('refreshToken')
+    .notEmpty()
+    .isUUID()
+    .withMessage('Valid refresh token is required')
+];
+
 const createIssueValidation = [
   body('title')
     .trim()
@@ -183,6 +190,7 @@ const updateCommentValidation = [
 module.exports = {
   registerValidation,
   loginValidation,
+  refreshTokenValidation,
   createIssueValidation,
   updateIssueStatusValidation,
   markDuplicateValidation,

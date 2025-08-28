@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const commentController = require('../controllers/commentController');
 const { authenticateToken, optionalAuth } = require('../middleware/auth');
+const rateLimitService = require('../services/rateLimitService');
 const { handleValidationErrors } = require('../middleware/errors');
 const { createCommentValidation, updateCommentValidation } = require('../middleware/validation');
 
@@ -13,6 +14,7 @@ router.get('/issues/:issueId/comments',
 
 router.post('/issues/:issueId/comments', 
   authenticateToken,
+  rateLimitService.commentRateLimit(),
   createCommentValidation,
   handleValidationErrors,
   commentController.createComment
