@@ -10,14 +10,20 @@ cloudinary.config({
 /**
  * Upload image to Cloudinary
  * @param {string|Buffer} filePathOrBuffer - Path to the file or buffer
- * @param {string} folder - Cloudinary folder to upload to
- * @param {Object} options - Additional upload options
+ * @param {Object} options - Upload options including folder
  * @returns {Promise<Object>} Upload result
  */
-const uploadImage = async (filePathOrBuffer, folder = 'naagrik', options = {}) => {
+const uploadImage = async (filePathOrBuffer, options = {}) => {
   try {
-    const result = await cloudinary.uploader.upload(filePathOrBuffer, {
-      folder,
+    let uploadData = filePathOrBuffer;
+    
+    // If it's a Buffer, convert to base64 data URI
+    if (Buffer.isBuffer(filePathOrBuffer)) {
+      // For images, we can use a generic image MIME type
+      uploadData = `data:image/png;base64,${filePathOrBuffer.toString('base64')}`;
+    }
+    
+    const result = await cloudinary.uploader.upload(uploadData, {
       resource_type: 'image',
       quality: 'auto',
       fetch_format: 'auto',
@@ -33,17 +39,22 @@ const uploadImage = async (filePathOrBuffer, folder = 'naagrik', options = {}) =
 /**
  * Upload video to Cloudinary
  * @param {string|Buffer} filePathOrBuffer - Path to the file or buffer
- * @param {string} folder - Cloudinary folder to upload to
- * @param {Object} options - Additional upload options
+ * @param {Object} options - Upload options including folder
  * @returns {Promise<Object>} Upload result
  */
-const uploadVideo = async (filePathOrBuffer, folder = 'naagrik/videos', options = {}) => {
+const uploadVideo = async (filePathOrBuffer, options = {}) => {
   try {
-    const result = await cloudinary.uploader.upload(filePathOrBuffer, {
-      folder,
+    let uploadData = filePathOrBuffer;
+    
+    // If it's a Buffer, convert to base64 data URI
+    if (Buffer.isBuffer(filePathOrBuffer)) {
+      // For videos, use a generic video MIME type
+      uploadData = `data:video/mp4;base64,${filePathOrBuffer.toString('base64')}`;
+    }
+    
+    const result = await cloudinary.uploader.upload(uploadData, {
       resource_type: 'video',
       quality: 'auto',
-      format: 'mp4',
       ...options,
     });
     return result;

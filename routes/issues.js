@@ -42,6 +42,7 @@ router.get('/:id/history',
 router.post('/', 
   authenticateToken,
   rateLimitService.issueRateLimit(),
+  issueController.uploadMiddleware,  // Process multipart/form-data FIRST
   createIssueValidation,
   handleValidationErrors,
   issueController.createIssue
