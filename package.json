@@ -1,7 +1,7 @@
 {
   "name": "naagrik-backend",
   "version": "1.0.0",
-  "description": "CivicConnect backend for Naagrik - A comprehensive civic engagement platform",
+  "description": "Naagrik backend for Naagrik - A comprehensive civic engagement platform",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
