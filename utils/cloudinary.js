@@ -14,7 +14,7 @@ cloudinary.config({
  * @param {Object} options - Additional upload options
  * @returns {Promise<Object>} Upload result
  */
-const uploadImage = async (filePath, folder = 'civicconnect', options = {}) => {
+const uploadImage = async (filePath, folder = 'naagrik', options = {}) => {
   try {
     const result = await cloudinary.uploader.upload(filePath, {
       folder,
@@ -37,7 +37,7 @@ const uploadImage = async (filePath, folder = 'civicconnect', options = {}) => {
  * @param {Object} options - Additional upload options
  * @returns {Promise<Object>} Upload result
  */
-const uploadVideo = async (filePath, folder = 'civicconnect/videos', options = {}) => {
+const uploadVideo = async (filePath, folder = 'naagrik/videos', options = {}) => {
   try {
     const result = await cloudinary.uploader.upload(filePath, {
       folder,

@@ -67,7 +67,7 @@ const uploadProfileImage = async (req, res) => {
     }
 
     // Upload to Cloudinary
-    const result = await uploadImage(req.file.path, 'civicconnect/profiles', {
+    const result = await uploadImage(req.file.path, 'naagrik/profiles', {
       public_id: `profile_${req.user.id}_${Date.now()}`,
       overwrite: true,
     });
@@ -123,11 +123,11 @@ const uploadIssueMedia = async (req, res) => {
         const isVideo = file.mimetype.startsWith('video/');
 
         if (isImage && isValidImage(file)) {
-          result = await uploadImage(file.path, 'civicconnect/issues', {
+          result = await uploadImage(file.path, 'naagrik/issues', {
             public_id: `issue_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
           });
         } else if (isVideo && isValidVideo(file)) {
-          result = await uploadVideo(file.path, 'civicconnect/issues', {
+          result = await uploadVideo(file.path, 'naagrik/issues', {
             public_id: `issue_video_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
           });
         } else {
