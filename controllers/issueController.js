@@ -256,6 +256,70 @@ const issueController = {
     } catch (error) {
       next(error);
     }
+  },
+
+  // Add media to existing issue
+  async addMediaToIssue(req, res, next) {
+    try {
+      const { issueId } = req.params;
+      const { mediaUrl, mediaType, isThumbnail = false } = req.body;
+      const userId = req.user.id;
+
+      const media = await issueService.addMediaToIssue(issueId, userId, mediaUrl, mediaType, isThumbnail);
+
+      res.status(201).json(formatApiResponse(
+        true,
+        { media },
+        'Media added to issue successfully'
+      ));
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  // Update issue thumbnail
+  async updateIssueThumbnail(req, res, next) {
+    try {
+      const { issueId } = req.params;
+      const { thumbnailUrl } = req.body;
+      const userId = req.user.id;
+
+      const result = await issueService.updateIssueThumbnail(issueId, thumbnailUrl, userId);
+
+      res.json(formatApiResponse(
+        true,
+        { result },
+        'Issue thumbnail updated successfully'
+      ));
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  // Remove media from issue
+  async removeMediaFromIssue(req, res, next) {
+    try {
+      const { mediaId } = req.params;
+      const userId = req.user.id;
+
+      const removedMedia = await issueService.removeMediaFromIssue(mediaId, userId);
+
+      if (!removedMedia) {
+        return res.status(404).json(formatApiResponse(
+          false,
+          null,
+          'Media not found or you do not have permission to remove it'
+        ));
+      }
+
+      res.json(formatApiResponse(
+        true,
+        { removedMedia },
+        'Media removed from issue successfully'
+      ));
+    } catch (error) {
+      next(error);
+    }
   }
 };
 

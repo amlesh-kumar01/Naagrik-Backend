@@ -187,6 +187,37 @@ const updateCommentValidation = [
     .withMessage('Comment must be between 1 and 1000 characters')
 ];
 
+const addMediaToIssueValidation = [
+  param('issueId')
+    .isUUID()
+    .withMessage('Valid issue ID is required'),
+  body('mediaUrl')
+    .isURL()
+    .withMessage('Valid media URL is required'),
+  body('mediaType')
+    .isIn(['IMAGE', 'VIDEO'])
+    .withMessage('Media type must be either IMAGE or VIDEO'),
+  body('isThumbnail')
+    .optional()
+    .isBoolean()
+    .withMessage('isThumbnail must be a boolean value')
+];
+
+const updateIssueThumbnailValidation = [
+  param('issueId')
+    .isUUID()
+    .withMessage('Valid issue ID is required'),
+  body('thumbnailUrl')
+    .isURL()
+    .withMessage('Valid thumbnail URL is required')
+];
+
+const removeMediaValidation = [
+  param('mediaId')
+    .isUUID()
+    .withMessage('Valid media ID is required')
+];
+
 module.exports = {
   registerValidation,
   loginValidation,
@@ -202,5 +233,8 @@ module.exports = {
   stewardApplicationValidation,
   reviewApplicationValidation,
   addStewardNoteValidation,
-  findSimilarIssuesValidation
+  findSimilarIssuesValidation,
+  addMediaToIssueValidation,
+  updateIssueThumbnailValidation,
+  removeMediaValidation
 };

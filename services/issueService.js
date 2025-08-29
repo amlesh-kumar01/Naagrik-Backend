@@ -17,19 +17,29 @@ const issueService = {
     } = issueData;
     
     const result = await transaction(async (client) => {
-      // Create the issue
+      // Create the issue (without thumbnail_url)
       const issueResult = await client.query(
         `INSERT INTO issues (
           user_id, category_id, title, description, 
-          location_lat, location_lng, address, thumbnail_url
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) 
+          location_lat, location_lng, address
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7) 
         RETURNING *`,
-        [userId, categoryId, title, description, locationLat, locationLng, address, thumbnailUrl]
+        [userId, categoryId, title, description, locationLat, locationLng, address]
       );
       
       const issue = issueResult.rows[0];
       
-      // Insert media files if any
+      // Handle thumbnail if provided
+      if (thumbnailUrl) {
+        await client.query(
+          `INSERT INTO issue_media (
+            issue_id, user_id, media_url, media_type, is_thumbnail, moderation_status
+          ) VALUES ($1, $2, $3, $4, $5, 'APPROVED')`,
+          [issue.id, userId, thumbnailUrl, 'IMAGE', true]
+        );
+      }
+      
+      // Insert additional media files if any
       if (mediaUrls && mediaUrls.length > 0) {
         for (const mediaUrl of mediaUrls) {
           // Determine media type based on URL or file extension
@@ -37,9 +47,9 @@ const issueService = {
           
           await client.query(
             `INSERT INTO issue_media (
-              issue_id, user_id, media_url, media_type, moderation_status
-            ) VALUES ($1, $2, $3, $4, 'APPROVED')`,
-            [issue.id, userId, mediaUrl, mediaType]
+              issue_id, user_id, media_url, media_type, is_thumbnail, moderation_status
+            ) VALUES ($1, $2, $3, $4, $5, 'APPROVED')`,
+            [issue.id, userId, mediaUrl, mediaType, false]
           );
         }
       }
@@ -64,11 +74,13 @@ const issueService = {
         u.full_name as user_name,
         u.reputation_score as user_reputation,
         ic.name as category_name,
-        pi.title as primary_issue_title
+        pi.title as primary_issue_title,
+        thumbnail.media_url as thumbnail_url
        FROM issues i
        LEFT JOIN users u ON i.user_id = u.id
        LEFT JOIN issue_categories ic ON i.category_id = ic.id
        LEFT JOIN issues pi ON i.primary_issue_id = pi.id
+       LEFT JOIN issue_media thumbnail ON i.id = thumbnail.issue_id AND thumbnail.is_thumbnail = true
        WHERE i.id = $1`,
       [issueId]
     );
@@ -80,10 +92,10 @@ const issueService = {
     // Get media files
     const mediaResult = await query(
       `SELECT 
-        id, media_url, media_type, moderation_status, ai_tags, created_at
+        id, media_url, media_type, is_thumbnail, moderation_status, ai_tags, created_at
        FROM issue_media
        WHERE issue_id = $1
-       ORDER BY created_at ASC`,
+       ORDER BY is_thumbnail DESC, created_at ASC`,
       [issueId]
     );
     
@@ -205,6 +217,7 @@ const issueService = {
         (SELECT COUNT(*) FROM issue_votes WHERE issue_id = i.id AND vote_type = 1) as upvote_count,
         (SELECT COUNT(*) FROM issue_votes WHERE issue_id = i.id AND vote_type = -1) as downvote_count,
         (SELECT COUNT(*) FROM issue_media WHERE issue_id = i.id) as media_count,
+        (SELECT media_url FROM issue_media WHERE issue_id = i.id AND is_thumbnail = true LIMIT 1) as thumbnail_url,
         (SELECT media_url FROM issue_media WHERE issue_id = i.id ORDER BY created_at ASC LIMIT 1) as first_media_url,
         (SELECT media_type FROM issue_media WHERE issue_id = i.id ORDER BY created_at ASC LIMIT 1) as first_media_type
         ${distanceSelect}
@@ -417,6 +430,62 @@ const issueService = {
   // Delete issue (soft delete by setting status to ARCHIVED)
   async deleteIssue(issueId, userId) {
     return await this.updateIssueStatus(issueId, 'ARCHIVED', userId, 'Issue deleted');
+  },
+
+  // Add media to an existing issue
+  async addMediaToIssue(issueId, userId, mediaUrl, mediaType, isThumbnail = false) {
+    const result = await query(
+      `INSERT INTO issue_media (
+        issue_id, user_id, media_url, media_type, is_thumbnail, moderation_status
+      ) VALUES ($1, $2, $3, $4, $5, 'APPROVED')
+      RETURNING *`,
+      [issueId, userId, mediaUrl, mediaType, isThumbnail]
+    );
+    
+    return result.rows[0];
+  },
+
+  // Update thumbnail for an issue
+  async updateIssueThumbnail(issueId, newThumbnailUrl, userId) {
+    const result = await transaction(async (client) => {
+      // Remove existing thumbnail flag
+      await client.query(
+        'UPDATE issue_media SET is_thumbnail = false WHERE issue_id = $1',
+        [issueId]
+      );
+      
+      // Set new thumbnail
+      const thumbnailResult = await client.query(
+        `INSERT INTO issue_media (
+          issue_id, user_id, media_url, media_type, is_thumbnail, moderation_status
+        ) VALUES ($1, $2, $3, 'IMAGE', true, 'APPROVED')
+        ON CONFLICT DO NOTHING
+        RETURNING *`,
+        [issueId, userId, newThumbnailUrl]
+      );
+      
+      // If the media already exists, just update the thumbnail flag
+      if (thumbnailResult.rows.length === 0) {
+        await client.query(
+          'UPDATE issue_media SET is_thumbnail = true WHERE issue_id = $1 AND media_url = $2',
+          [issueId, newThumbnailUrl]
+        );
+      }
+      
+      return thumbnailResult.rows[0];
+    });
+    
+    return result;
+  },
+
+  // Remove media from issue
+  async removeMediaFromIssue(mediaId, userId) {
+    const result = await query(
+      'DELETE FROM issue_media WHERE id = $1 AND user_id = $2 RETURNING *',
+      [mediaId, userId]
+    );
+    
+    return result.rows[0];
   }
 };
 

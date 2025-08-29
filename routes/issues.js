@@ -10,7 +10,10 @@ const {
   markDuplicateValidation,
   voteValidation,
   issueFilterValidation,
-  findSimilarIssuesValidation
+  findSimilarIssuesValidation,
+  addMediaToIssueValidation,
+  updateIssueThumbnailValidation,
+  removeMediaValidation
 } = require('../middleware/validation');
 
 // Public/Optional auth routes
@@ -67,6 +70,28 @@ router.post('/:issueId/vote',
 router.delete('/:id', 
   authenticateToken,
   issueController.deleteIssue
+);
+
+// Media management routes
+router.post('/:issueId/media', 
+  authenticateToken,
+  addMediaToIssueValidation,
+  handleValidationErrors,
+  issueController.addMediaToIssue
+);
+
+router.put('/:issueId/thumbnail', 
+  authenticateToken,
+  updateIssueThumbnailValidation,
+  handleValidationErrors,
+  issueController.updateIssueThumbnail
+);
+
+router.delete('/media/:mediaId', 
+  authenticateToken,
+  removeMediaValidation,
+  handleValidationErrors,
+  issueController.removeMediaFromIssue
 );
 
 // Steward/Admin only routes

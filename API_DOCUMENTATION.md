@@ -229,6 +229,7 @@ GET /api/issues?page=1&limit=10&status=OPEN&categoryId=1&search=road
         "user_name": "John Doe",
         "vote_score": 15,
         "thumbnail_url": "https://cloudinary.com/image.jpg",
+        "media_count": 3,
         "created_at": "2024-01-01T00:00:00.000Z",
         "updated_at": "2024-01-01T00:00:00.000Z"
       }
@@ -300,7 +301,18 @@ Get detailed information about a specific issue.
       {
         "id": "uuid",
         "media_url": "https://cloudinary.com/image1.jpg",
-        "media_type": "IMAGE"
+        "media_type": "IMAGE",
+        "is_thumbnail": true,
+        "moderation_status": "APPROVED",
+        "created_at": "2024-01-01T00:00:00.000Z"
+      },
+      {
+        "id": "uuid",
+        "media_url": "https://cloudinary.com/video1.mp4",
+        "media_type": "VIDEO",
+        "is_thumbnail": false,
+        "moderation_status": "APPROVED",
+        "created_at": "2024-01-01T00:00:00.000Z"
       }
     ]
   }
@@ -463,6 +475,102 @@ Authorization: Bearer <token>
 - `401`: Authentication required
 - `403`: Insufficient permissions
 - `404`: Issue not found
+
+---
+
+### POST /api/issues/:issueId/media
+Add media to an existing issue (requires authentication).
+
+**Headers:**
+```
+Authorization: Bearer <token>
+```
+
+**Request Body:**
+```json
+{
+  "mediaUrl": "https://cloudinary.com/new-image.jpg",
+  "mediaType": "IMAGE",
+  "isThumbnail": false
+}
+```
+
+**Response (201):**
+```json
+{
+  "success": true,
+  "data": {
+    "media": {
+      "id": "uuid",
+      "issue_id": "uuid",
+      "user_id": "uuid",
+      "media_url": "https://cloudinary.com/new-image.jpg",
+      "media_type": "IMAGE",
+      "is_thumbnail": false,
+      "moderation_status": "APPROVED",
+      "created_at": "2024-01-01T00:00:00.000Z"
+    }
+  },
+  "message": "Media added to issue successfully"
+}
+```
+
+---
+
+### PUT /api/issues/:issueId/thumbnail
+Update the thumbnail for an issue (requires authentication).
+
+**Headers:**
+```
+Authorization: Bearer <token>
+```
+
+**Request Body:**
+```json
+{
+  "thumbnailUrl": "https://cloudinary.com/new-thumbnail.jpg"
+}
+```
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "data": {
+    "result": "thumbnail updated"
+  },
+  "message": "Issue thumbnail updated successfully"
+}
+```
+
+---
+
+### DELETE /api/issues/media/:mediaId
+Remove media from an issue (requires authentication - only by media uploader).
+
+**Headers:**
+```
+Authorization: Bearer <token>
+```
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "data": {
+    "removedMedia": {
+      "id": "uuid",
+      "media_url": "https://cloudinary.com/removed-image.jpg",
+      "media_type": "IMAGE"
+    }
+  },
+  "message": "Media removed from issue successfully"
+}
+```
+
+**Error Responses:**
+- `401`: Authentication required
+- `404`: Media not found or insufficient permissions
 
 ---
 
