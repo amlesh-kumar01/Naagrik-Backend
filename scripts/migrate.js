@@ -68,7 +68,6 @@ CREATE TABLE IF NOT EXISTS issues (
     location_lat DECIMAL(10, 8) NOT NULL,
     location_lng DECIMAL(11, 8) NOT NULL,
     address TEXT,
-    thumbnail_url TEXT,
     vote_score INTEGER NOT NULL DEFAULT 0,
     ai_flag BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -194,6 +193,7 @@ CREATE TABLE IF NOT EXISTS issue_media (
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     media_url TEXT NOT NULL,
     media_type media_type NOT NULL,
+    is_thumbnail BOOLEAN NOT NULL DEFAULT FALSE,
     moderation_status moderation_status NOT NULL DEFAULT 'PENDING',
     moderation_score FLOAT,
     ai_tags TEXT[],
@@ -349,3 +349,16 @@ async function runMigration() {
 }
 
 module.exports = { runMigration };
+
+// Run migration if called directly
+if (require.main === module) {
+  runMigration()
+    .then(() => {
+      console.log('Migration completed successfully!');
+      process.exit(0);
+    })
+    .catch((error) => {
+      console.error('Migration failed:', error);
+      process.exit(1);
+    });
+}
