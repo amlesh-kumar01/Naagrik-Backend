@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const commentController = require('../controllers/commentController');
 const { authenticateToken, optionalAuth } = require('../middleware/auth');
-const rateLimitService = require('../services/rateLimitService');
+const rateLimitService = require('../services/redis/rateLimitService');
 const { handleValidationErrors } = require('../middleware/errors');
 const { createCommentValidation, updateCommentValidation } = require('../middleware/validation');
 

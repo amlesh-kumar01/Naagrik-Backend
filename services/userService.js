@@ -1,5 +1,5 @@
 const { query, transaction } = require('../config/database');
-const cacheService = require('./cacheService');
+const cacheService = require('./redis/cacheService');
 const { hashPassword, comparePassword, sanitizeUser, calculateReputationChange } = require('../utils/helpers');
 
 const userService = {

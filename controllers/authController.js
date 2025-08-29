@@ -1,5 +1,5 @@
 const userService = require('../services/userService');
-const sessionService = require('../services/sessionService');
+const sessionService = require('../services/redis/sessionService');
 const { generateToken, formatApiResponse } = require('../utils/helpers');
 const crypto = require('crypto');
 

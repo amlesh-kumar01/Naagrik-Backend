@@ -1,6 +1,6 @@
 const express = require('express');
 const { authenticateToken } = require('../middleware/auth');
-const rateLimitService = require('../services/rateLimitService');
+const rateLimitService = require('../services/redis/rateLimitService');
 const {
   upload,
   uploadProfileImage,
