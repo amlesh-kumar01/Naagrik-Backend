@@ -1,6 +1,7 @@
 const { query, transaction } = require('../config/database');
 const { getPagination, getPaginationInfo } = require('../utils/helpers');
 const userService = require('./userService');
+const mediaService = require('./mediaService');
 
 const issueService = {
   // Create a new issue
@@ -12,12 +13,15 @@ const issueService = {
       locationLat, 
       locationLng, 
       address,
-      thumbnailUrl,
-      mediaUrls = []
     } = issueData;
     
+    // Validate required fields
+    if (!title || !description || !categoryId) {
+      throw new Error('Title, description, and category are required');
+    }
+    
     const result = await transaction(async (client) => {
-      // Create the issue (without thumbnail_url)
+      // Create the issue
       const issueResult = await client.query(
         `INSERT INTO issues (
           user_id, category_id, title, description, 
@@ -28,32 +32,6 @@ const issueService = {
       );
       
       const issue = issueResult.rows[0];
-      
-      // Handle thumbnail if provided
-      if (thumbnailUrl) {
-        await client.query(
-          `INSERT INTO issue_media (
-            issue_id, user_id, media_url, media_type, is_thumbnail, moderation_status
-          ) VALUES ($1, $2, $3, $4, $5, 'APPROVED')`,
-          [issue.id, userId, thumbnailUrl, 'IMAGE', true]
-        );
-      }
-      
-      // Insert additional media files if any
-      if (mediaUrls && mediaUrls.length > 0) {
-        for (const mediaUrl of mediaUrls) {
-          // Determine media type based on URL or file extension
-          const mediaType = mediaUrl.includes('/video/') ? 'VIDEO' : 'IMAGE';
-          
-          await client.query(
-            `INSERT INTO issue_media (
-              issue_id, user_id, media_url, media_type, is_thumbnail, moderation_status
-            ) VALUES ($1, $2, $3, $4, $5, 'APPROVED')`,
-            [issue.id, userId, mediaUrl, mediaType, false]
-          );
-        }
-      }
-      
       // Update user reputation
       await client.query(
         'UPDATE users SET reputation_score = reputation_score + 5 WHERE id = $1',
@@ -89,17 +67,8 @@ const issueService = {
     
     const issue = issueResult.rows[0];
     
-    // Get media files
-    const mediaResult = await query(
-      `SELECT 
-        id, media_url, media_type, is_thumbnail, moderation_status, ai_tags, created_at
-       FROM issue_media
-       WHERE issue_id = $1
-       ORDER BY is_thumbnail DESC, created_at ASC`,
-      [issueId]
-    );
-    
-    issue.media = mediaResult.rows;
+    // Get media files using mediaService
+    issue.media = await mediaService.getIssueMedia(issueId);
     
     if (includeComments) {
       const commentsResult = await query(
@@ -216,10 +185,10 @@ const issueService = {
         (SELECT COUNT(*) FROM comments WHERE issue_id = i.id) as comment_count,
         (SELECT COUNT(*) FROM issue_votes WHERE issue_id = i.id AND vote_type = 1) as upvote_count,
         (SELECT COUNT(*) FROM issue_votes WHERE issue_id = i.id AND vote_type = -1) as downvote_count,
-        (SELECT COUNT(*) FROM issue_media WHERE issue_id = i.id) as media_count,
-        (SELECT media_url FROM issue_media WHERE issue_id = i.id AND is_thumbnail = true LIMIT 1) as thumbnail_url,
-        (SELECT media_url FROM issue_media WHERE issue_id = i.id ORDER BY created_at ASC LIMIT 1) as first_media_url,
-        (SELECT media_type FROM issue_media WHERE issue_id = i.id ORDER BY created_at ASC LIMIT 1) as first_media_type
+        (SELECT COUNT(*) FROM issue_media WHERE issue_id = i.id AND moderation_status != 'REJECTED') as media_count,
+        (SELECT media_url FROM issue_media WHERE issue_id = i.id AND is_thumbnail = true AND moderation_status != 'REJECTED' LIMIT 1) as thumbnail_url,
+        (SELECT media_url FROM issue_media WHERE issue_id = i.id AND moderation_status != 'REJECTED' ORDER BY created_at ASC LIMIT 1) as first_media_url,
+        (SELECT media_type FROM issue_media WHERE issue_id = i.id AND moderation_status != 'REJECTED' ORDER BY created_at ASC LIMIT 1) as first_media_type
         ${distanceSelect}
       FROM issues i
       LEFT JOIN users u ON i.user_id = u.id
@@ -233,8 +202,20 @@ const issueService = {
     
     const issuesResult = await query(issuesQuery, queryParams);
     
+    // Optionally include media previews for list view
+    const issuesWithMedia = issuesResult.rows.map(issue => ({
+      ...issue,
+      has_media: issue.media_count > 0,
+      preview_media: {
+        thumbnail: issue.thumbnail_url,
+        first_media: issue.first_media_url,
+        first_media_type: issue.first_media_type,
+        total_count: parseInt(issue.media_count)
+      }
+    }));
+
     return {
-      issues: issuesResult.rows,
+      issues: issuesWithMedia,
       pagination: getPaginationInfo(page, limitInt, totalCount)
     };
   },
@@ -434,58 +415,42 @@ const issueService = {
 
   // Add media to an existing issue
   async addMediaToIssue(issueId, userId, mediaUrl, mediaType, isThumbnail = false) {
-    const result = await query(
-      `INSERT INTO issue_media (
-        issue_id, user_id, media_url, media_type, is_thumbnail, moderation_status
-      ) VALUES ($1, $2, $3, $4, $5, 'APPROVED')
-      RETURNING *`,
-      [issueId, userId, mediaUrl, mediaType, isThumbnail]
-    );
+    return await mediaService.addMediaToIssue(issueId, userId, mediaUrl, mediaType, isThumbnail);
+  },
+
+  // Bulk add media to an existing issue
+  async addMultipleMediaToIssue(issueId, userId, mediaUrls) {
+    // Verify issue exists and user has permission
+    const issue = await this.getIssueById(issueId, false);
+    if (!issue) {
+      throw new Error('Issue not found');
+    }
     
-    return result.rows[0];
+    if (issue.user_id !== userId) {
+      throw new Error('You can only add media to your own issues');
+    }
+
+    return await mediaService.createMultipleMediaRecords(issueId, userId, mediaUrls);
   },
 
   // Update thumbnail for an issue
   async updateIssueThumbnail(issueId, newThumbnailUrl, userId) {
-    const result = await transaction(async (client) => {
-      // Remove existing thumbnail flag
-      await client.query(
-        'UPDATE issue_media SET is_thumbnail = false WHERE issue_id = $1',
-        [issueId]
-      );
-      
-      // Set new thumbnail
-      const thumbnailResult = await client.query(
-        `INSERT INTO issue_media (
-          issue_id, user_id, media_url, media_type, is_thumbnail, moderation_status
-        ) VALUES ($1, $2, $3, 'IMAGE', true, 'APPROVED')
-        ON CONFLICT DO NOTHING
-        RETURNING *`,
-        [issueId, userId, newThumbnailUrl]
-      );
-      
-      // If the media already exists, just update the thumbnail flag
-      if (thumbnailResult.rows.length === 0) {
-        await client.query(
-          'UPDATE issue_media SET is_thumbnail = true WHERE issue_id = $1 AND media_url = $2',
-          [issueId, newThumbnailUrl]
-        );
-      }
-      
-      return thumbnailResult.rows[0];
-    });
-    
-    return result;
+    return await mediaService.updateIssueThumbnail(issueId, newThumbnailUrl, userId);
+  },
+
+  // Set existing media as thumbnail
+  async setMediaAsThumbnail(issueId, mediaId, userId) {
+    return await mediaService.setIssueThumbnail(issueId, mediaId, userId);
   },
 
   // Remove media from issue
   async removeMediaFromIssue(mediaId, userId) {
-    const result = await query(
-      'DELETE FROM issue_media WHERE id = $1 AND user_id = $2 RETURNING *',
-      [mediaId, userId]
-    );
-    
-    return result.rows[0];
+    return await mediaService.removeMediaFromIssue(mediaId, userId);
+  },
+
+  // Get all media for an issue
+  async getIssueMedia(issueId) {
+    return await mediaService.getIssueMedia(issueId);
   }
 };
 

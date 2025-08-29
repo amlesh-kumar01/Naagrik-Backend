@@ -9,14 +9,14 @@ cloudinary.config({
 
 /**
  * Upload image to Cloudinary
- * @param {string} filePath - Path to the file
+ * @param {string|Buffer} filePathOrBuffer - Path to the file or buffer
  * @param {string} folder - Cloudinary folder to upload to
  * @param {Object} options - Additional upload options
  * @returns {Promise<Object>} Upload result
  */
-const uploadImage = async (filePath, folder = 'naagrik', options = {}) => {
+const uploadImage = async (filePathOrBuffer, folder = 'naagrik', options = {}) => {
   try {
-    const result = await cloudinary.uploader.upload(filePath, {
+    const result = await cloudinary.uploader.upload(filePathOrBuffer, {
       folder,
       resource_type: 'image',
       quality: 'auto',
@@ -32,14 +32,14 @@ const uploadImage = async (filePath, folder = 'naagrik', options = {}) => {
 
 /**
  * Upload video to Cloudinary
- * @param {string} filePath - Path to the file
+ * @param {string|Buffer} filePathOrBuffer - Path to the file or buffer
  * @param {string} folder - Cloudinary folder to upload to
  * @param {Object} options - Additional upload options
  * @returns {Promise<Object>} Upload result
  */
-const uploadVideo = async (filePath, folder = 'naagrik/videos', options = {}) => {
+const uploadVideo = async (filePathOrBuffer, folder = 'naagrik/videos', options = {}) => {
   try {
-    const result = await cloudinary.uploader.upload(filePath, {
+    const result = await cloudinary.uploader.upload(filePathOrBuffer, {
       folder,
       resource_type: 'video',
       quality: 'auto',

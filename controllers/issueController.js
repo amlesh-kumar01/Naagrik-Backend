@@ -1,18 +1,55 @@
 const issueService = require('../services/issueService');
+const mediaService = require('../services/mediaService');
 const { formatApiResponse } = require('../utils/helpers');
+const multer = require('multer');
+
+// Configure multer for memory storage
+const storage = multer.memoryStorage();
+
+const fileFilter = (req, file, cb) => {
+  // Accept images and videos
+  if (file.mimetype.startsWith('image/') || file.mimetype.startsWith('video/')) {
+    cb(null, true);
+  } else {
+    cb(new Error('Invalid file type. Only images and videos are allowed.'), false);
+  }
+};
+
+const upload = multer({
+  storage: storage,
+  limits: {
+    fileSize: 100 * 1024 * 1024, // 100MB limit
+    files: 5 // Maximum 5 files
+  },
+  fileFilter: fileFilter
+});
 
 const issueController = {
-  // Create new issue
+  // Create new issue (with optional media upload)
   async createIssue(req, res, next) {
     try {
       const issueData = req.body;
       const userId = req.user.id;
+      const uploadedFiles = req.files;
       
+      // Create the issue first
       const issue = await issueService.createIssue(issueData, userId);
+      
+      // If files were uploaded, use mediaService to handle everything
+      let mediaRecords = [];
+      if (uploadedFiles && uploadedFiles.length > 0) {
+        mediaRecords = await mediaService.processAndSaveFiles(issue.id, userId, uploadedFiles);
+      }
+      
+      // Get the complete issue with media for response
+      const completeIssue = await issueService.getIssueById(issue.id, false);
       
       res.status(201).json(formatApiResponse(
         true,
-        { issue },
+        { 
+          issue: completeIssue,
+          uploadedMedia: mediaRecords
+        },
         'Issue created successfully'
       ));
     } catch (error) {
@@ -262,14 +299,31 @@ const issueController = {
   async addMediaToIssue(req, res, next) {
     try {
       const { issueId } = req.params;
-      const { mediaUrl, mediaType, isThumbnail = false } = req.body;
+      const { mediaItems } = req.body;
       const userId = req.user.id;
 
-      const media = await issueService.addMediaToIssue(issueId, userId, mediaUrl, mediaType, isThumbnail);
+      let mediaRecords;
+      
+      if (Array.isArray(mediaItems)) {
+        // Multiple media items
+        mediaRecords = await mediaService.createMultipleMediaRecords(issueId, userId, mediaItems);
+      } else {
+        // Single media item (legacy support)
+        const { mediaUrl, mediaType, isThumbnail = false } = req.body;
+        
+        const mediaRecord = await mediaService.createMediaRecord({
+          issueId,
+          userId,
+          url: mediaUrl,
+          type: mediaType,
+          isThumbnail
+        });
+        mediaRecords = [mediaRecord];
+      }
 
       res.status(201).json(formatApiResponse(
         true,
-        { media },
+        { media: mediaRecords },
         'Media added to issue successfully'
       ));
     } catch (error) {
@@ -281,14 +335,28 @@ const issueController = {
   async updateIssueThumbnail(req, res, next) {
     try {
       const { issueId } = req.params;
-      const { thumbnailUrl } = req.body;
+      const { mediaId, thumbnailUrl } = req.body;
       const userId = req.user.id;
 
-      const result = await issueService.updateIssueThumbnail(issueId, thumbnailUrl, userId);
+      let result;
+      
+      if (mediaId) {
+        // Set existing media as thumbnail
+        result = await mediaService.setIssueThumbnail(issueId, mediaId, userId);
+      } else if (thumbnailUrl) {
+        // Add new thumbnail (legacy support)
+        result = await mediaService.updateIssueThumbnail(issueId, thumbnailUrl, userId);
+      } else {
+        return res.status(400).json(formatApiResponse(
+          false,
+          null,
+          'Either mediaId or thumbnailUrl is required'
+        ));
+      }
 
       res.json(formatApiResponse(
         true,
-        { result },
+        { thumbnail: result },
         'Issue thumbnail updated successfully'
       ));
     } catch (error) {
@@ -302,15 +370,7 @@ const issueController = {
       const { mediaId } = req.params;
       const userId = req.user.id;
 
-      const removedMedia = await issueService.removeMediaFromIssue(mediaId, userId);
-
-      if (!removedMedia) {
-        return res.status(404).json(formatApiResponse(
-          false,
-          null,
-          'Media not found or you do not have permission to remove it'
-        ));
-      }
+      const removedMedia = await mediaService.deleteMedia(mediaId, userId);
 
       res.json(formatApiResponse(
         true,
@@ -320,7 +380,47 @@ const issueController = {
     } catch (error) {
       next(error);
     }
+  },
+
+  // Get media for an issue
+  async getIssueMedia(req, res, next) {
+    try {
+      const { issueId } = req.params;
+      
+      const media = await mediaService.getIssueMedia(issueId);
+
+      res.json(formatApiResponse(
+        true,
+        { media },
+        'Issue media retrieved successfully'
+      ));
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  // Bulk add media to issue (for upload integration)
+  async bulkAddMediaToIssue(req, res, next) {
+    try {
+      const { issueId } = req.params;
+      const { mediaUrls } = req.body;
+      const userId = req.user.id;
+
+      const mediaRecords = await mediaService.createMultipleMediaRecords(issueId, userId, mediaUrls);
+
+      res.status(201).json(formatApiResponse(
+        true,
+        { media: mediaRecords },
+        'Media added to issue successfully'
+      ));
+    } catch (error) {
+      next(error);
+    }
   }
 };
 
-module.exports = issueController;
+// Export both the controller and multer middleware
+module.exports = {
+  ...issueController,
+  uploadMiddleware: upload.array('media', 5) // Accept up to 5 files with field name 'media'
+};

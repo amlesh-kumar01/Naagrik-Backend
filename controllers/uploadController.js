@@ -1,6 +1,4 @@
 const multer = require('multer');
-const path = require('path');
-const fs = require('fs').promises;
 const {
   cloudinary,
   uploadImage,
@@ -10,23 +8,10 @@ const {
   isValidImage,
   isValidVideo,
 } = require('../utils/cloudinary');
+const mediaService = require('../services/mediaService');
 
-// Configure multer for temporary file storage
-const storage = multer.diskStorage({
-  destination: async (req, file, cb) => {
-    const uploadDir = path.join(__dirname, '../temp');
-    try {
-      await fs.mkdir(uploadDir, { recursive: true });
-      cb(null, uploadDir);
-    } catch (error) {
-      cb(error);
-    }
-  },
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
-  },
-});
+// Configure multer for memory storage (no disk storage)
+const storage = multer.memoryStorage();
 
 const upload = multer({
   storage,
@@ -58,22 +43,17 @@ const uploadProfileImage = async (req, res) => {
     }
 
     if (!isValidImage(req.file)) {
-      // Clean up temporary file
-      await fs.unlink(req.file.path);
       return res.status(400).json({ 
         success: false, 
         message: 'Invalid image file' 
       });
     }
 
-    // Upload to Cloudinary
-    const result = await uploadImage(req.file.path, 'naagrik/profiles', {
+    // Upload to Cloudinary directly from memory buffer
+    const result = await uploadImage(req.file.buffer, 'naagrik/profiles', {
       public_id: `profile_${req.user.id}_${Date.now()}`,
       overwrite: true,
     });
-
-    // Clean up temporary file
-    await fs.unlink(req.file.path);
 
     res.json({
       success: true,
@@ -86,15 +66,6 @@ const uploadProfileImage = async (req, res) => {
     });
   } catch (error) {
     console.error('Profile image upload error:', error);
-    
-    // Clean up temporary file if it exists
-    if (req.file && req.file.path) {
-      try {
-        await fs.unlink(req.file.path);
-      } catch (unlinkError) {
-        console.error('Error cleaning up temp file:', unlinkError);
-      }
-    }
 
     res.status(500).json({ 
       success: false, 
@@ -116,6 +87,8 @@ const uploadIssueMedia = async (req, res) => {
       });
     }
 
+    const { issueId } = req.body; // Optional - if provided, save to DB immediately
+
     const uploadPromises = req.files.map(async (file) => {
       try {
         let result;
@@ -123,19 +96,16 @@ const uploadIssueMedia = async (req, res) => {
         const isVideo = file.mimetype.startsWith('video/');
 
         if (isImage && isValidImage(file)) {
-          result = await uploadImage(file.path, 'naagrik/issues', {
+          result = await uploadImage(file.buffer, 'naagrik/issues', {
             public_id: `issue_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
           });
         } else if (isVideo && isValidVideo(file)) {
-          result = await uploadVideo(file.path, 'naagrik/issues', {
+          result = await uploadVideo(file.buffer, 'naagrik/issues', {
             public_id: `issue_video_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
           });
         } else {
           throw new Error(`Invalid file type: ${file.mimetype}`);
         }
-
-        // Clean up temporary file
-        await fs.unlink(file.path);
 
         return {
           url: result.secure_url,
@@ -146,17 +116,33 @@ const uploadIssueMedia = async (req, res) => {
           duration: result.duration || null,
         };
       } catch (error) {
-        // Clean up temporary file
-        try {
-          await fs.unlink(file.path);
-        } catch (unlinkError) {
-          console.error('Error cleaning up temp file:', unlinkError);
-        }
         throw error;
       }
     });
 
     const uploadResults = await Promise.all(uploadPromises);
+
+    // If issueId provided, save to database immediately
+    if (issueId && req.user) {
+      try {
+        const mediaRecords = await mediaService.createMultipleMediaRecords(
+          issueId, 
+          req.user.id, 
+          uploadResults
+        );
+        
+        return res.json({
+          success: true,
+          data: {
+            media: uploadResults,
+            records: mediaRecords
+          },
+        });
+      } catch (dbError) {
+        console.error('Database save error:', dbError);
+        // Return upload results even if DB save fails
+      }
+    }
 
     res.json({
       success: true,
@@ -164,19 +150,6 @@ const uploadIssueMedia = async (req, res) => {
     });
   } catch (error) {
     console.error('Issue media upload error:', error);
-    
-    // Clean up any remaining temporary files
-    if (req.files) {
-      await Promise.all(
-        req.files.map(async (file) => {
-          try {
-            await fs.unlink(file.path);
-          } catch (unlinkError) {
-            console.error('Error cleaning up temp file:', unlinkError);
-          }
-        })
-      );
-    }
 
     res.status(500).json({ 
       success: false, 
