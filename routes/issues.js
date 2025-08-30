@@ -131,6 +131,22 @@ router.post('/:issueId/vote',
   issueController.voteIssue
 );
 
+router.get('/:issueId/vote-status',
+  authenticateToken,
+  issueController.getUserVoteStatus
+);
+
+router.delete('/:issueId/vote',
+  authenticateToken,
+  rateLimitService.createMiddleware({
+    maxRequests: 100,
+    windowSeconds: 3600,
+    type: 'vote',
+    keyGenerator: (req) => req.user?.id || req.ip
+  }),
+  issueController.deleteVote
+);
+
 router.delete('/:id', 
   authenticateToken,
   issueController.deleteIssue

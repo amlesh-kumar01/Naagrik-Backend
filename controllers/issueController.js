@@ -42,7 +42,7 @@ const issueController = {
       }
       
       // Get the complete issue with media for response
-      const completeIssue = await issueService.getIssueById(issue.id, false);
+      const completeIssue = await issueService.getIssueById(issue.id, false, userId);
       
       res.status(201).json(formatApiResponse(
         true,
@@ -72,6 +72,8 @@ const issueController = {
         radius
       } = req.query;
       
+      const currentUserId = req.user?.id; // Get current user ID for vote status
+      
       const filters = {
         status,
         categoryId: categoryId ? parseInt(categoryId) : undefined,
@@ -82,7 +84,7 @@ const issueController = {
         radius: radius ? parseFloat(radius) : undefined
       };
       
-      const result = await issueService.getIssues(filters, parseInt(page), parseInt(limit));
+      const result = await issueService.getIssues(filters, parseInt(page), parseInt(limit), currentUserId);
       
       res.json(formatApiResponse(
         true,
@@ -99,8 +101,9 @@ const issueController = {
   async getIssueById(req, res, next) {
     try {
       const { id } = req.params;
+      const currentUserId = req.user?.id; // Get current user ID for vote status
       
-      const issue = await issueService.getIssueById(id);
+      const issue = await issueService.getIssueById(id, true, currentUserId);
       if (!issue) {
         return res.status(404).json(formatApiResponse(
           false,
@@ -165,7 +168,7 @@ const issueController = {
       const userId = req.user.id;
       
       // Check if user is trying to vote on their own issue
-      const issue = await issueService.getIssueById(issueId, false);
+      const issue = await issueService.getIssueById(issueId, false, userId);
       if (!issue) {
         return res.status(404).json(formatApiResponse(
           false,
@@ -188,6 +191,42 @@ const issueController = {
         true,
         result,
         'Vote recorded successfully'
+      ));
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  // Get user vote status for an issue
+  async getUserVoteStatus(req, res, next) {
+    try {
+      const { issueId } = req.params;
+      const userId = req.user.id;
+      
+      const voteStatus = await issueService.getUserVoteStatus(issueId, userId);
+      
+      res.json(formatApiResponse(
+        true,
+        voteStatus,
+        'User vote status retrieved successfully'
+      ));
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  // Delete user vote on an issue
+  async deleteVote(req, res, next) {
+    try {
+      const { issueId } = req.params;
+      const userId = req.user.id;
+      
+      const result = await issueService.deleteVote(issueId, userId);
+      
+      res.json(formatApiResponse(
+        true,
+        result,
+        'Vote removed successfully'
       ));
     } catch (error) {
       next(error);
@@ -233,7 +272,7 @@ const issueController = {
       const userId = req.user.id;
       
       // Check if user owns the issue or is admin/steward
-      const issue = await issueService.getIssueById(id, false);
+      const issue = await issueService.getIssueById(id, false, userId);
       if (!issue) {
         return res.status(404).json(formatApiResponse(
           false,
@@ -435,6 +474,8 @@ const issueController = {
         offset
       } = req.query;
 
+      const currentUserId = req.user?.id; // Get current user ID for vote status
+
       const filters = {
         status: status ? (Array.isArray(status) ? status : [status]) : undefined,
         category: category ? parseInt(category) : undefined,
@@ -450,7 +491,8 @@ const issueController = {
         } : undefined,
         search,
         limit: parseInt(limit) || 50,
-        offset: parseInt(offset) || 0
+        offset: parseInt(offset) || 0,
+        currentUserId // Add current user ID to filters
       };
 
       const issues = await issueService.getIssuesWithFilters(filters);
@@ -473,8 +515,9 @@ const issueController = {
   async getTrendingIssues(req, res, next) {
     try {
       const { limit } = req.query;
+      const currentUserId = req.user?.id; // Get current user ID for vote status
       
-      const issues = await issueService.getTrendingIssues(parseInt(limit) || 20);
+      const issues = await issueService.getTrendingIssues(parseInt(limit) || 20, currentUserId);
 
       res.json(formatApiResponse(
         true,
@@ -537,7 +580,7 @@ const issueController = {
     try {
       const stewardId = req.user.id;
       
-      const issues = await issueService.getIssuesRequiringAttention(stewardId);
+      const issues = await issueService.getIssuesRequiringAttention(stewardId, stewardId);
 
       res.json(formatApiResponse(
         true,
@@ -568,6 +611,7 @@ const issueController = {
   async getIssuesByLocation(req, res, next) {
     try {
       const { lat, lng, radius = 5000, status, limit = 50 } = req.query;
+      const currentUserId = req.user?.id; // Get current user ID for vote status
 
       if (!lat || !lng) {
         return res.status(400).json(formatApiResponse(
@@ -584,7 +628,8 @@ const issueController = {
           radius: parseInt(radius)
         },
         status: status ? [status] : undefined,
-        limit: parseInt(limit)
+        limit: parseInt(limit),
+        currentUserId // Add current user ID for vote status
       };
 
       const issues = await issueService.getIssuesWithFilters(filters);
@@ -609,7 +654,8 @@ const issueController = {
         userId,
         status: status ? [status] : undefined,
         limit: parseInt(limit) || 50,
-        offset: parseInt(offset) || 0
+        offset: parseInt(offset) || 0,
+        currentUserId: userId // Add current user ID for vote status
       };
 
       const issues = await issueService.getIssuesWithFilters(filters);

@@ -46,7 +46,25 @@ const issueService = {
   },
 
   // Get issue by ID with full details
-  async getIssueById(issueId, includeComments = true) {
+  async getIssueById(issueId, includeComments = true, currentUserId = null) {
+    let voteSelectClause = '';
+    let queryParams = [issueId];
+    
+    if (currentUserId) {
+      voteSelectClause = `, 
+        (SELECT vote_type FROM issue_votes WHERE issue_id = i.id AND user_id = $2) as user_vote_type,
+        CASE WHEN (SELECT vote_type FROM issue_votes WHERE issue_id = i.id AND user_id = $3) IS NOT NULL THEN true ELSE false END as user_has_voted,
+        (SELECT COUNT(*) FROM issue_votes WHERE issue_id = i.id AND vote_type = 1) as upvote_count,
+        (SELECT COUNT(*) FROM issue_votes WHERE issue_id = i.id AND vote_type = -1) as downvote_count`;
+      queryParams = [issueId, currentUserId, currentUserId];
+    } else {
+      voteSelectClause = `, 
+        NULL as user_vote_type,
+        false as user_has_voted,
+        (SELECT COUNT(*) FROM issue_votes WHERE issue_id = i.id AND vote_type = 1) as upvote_count,
+        (SELECT COUNT(*) FROM issue_votes WHERE issue_id = i.id AND vote_type = -1) as downvote_count`;
+    }
+    
     const issueResult = await query(
       `SELECT 
         i.*,
@@ -55,13 +73,14 @@ const issueService = {
         ic.name as category_name,
         pi.title as primary_issue_title,
         thumbnail.media_url as thumbnail_url
+        ${voteSelectClause}
        FROM issues i
        LEFT JOIN users u ON i.user_id = u.id
        LEFT JOIN issue_categories ic ON i.category_id = ic.id
        LEFT JOIN issues pi ON i.primary_issue_id = pi.id
        LEFT JOIN issue_media thumbnail ON i.id = thumbnail.issue_id AND thumbnail.is_thumbnail = true
        WHERE i.id = $1`,
-      [issueId]
+      queryParams
     );
     
     if (issueResult.rows.length === 0) return null;
@@ -101,11 +120,23 @@ const issueService = {
     
     issue.steward_notes = notesResult.rows;
     
+    // Add user vote status to the issue
+    if (currentUserId) {
+      issue.user_vote_status = {
+        hasVoted: issue.user_has_voted,
+        voteType: issue.user_vote_type || null,
+        voteTypeText: issue.user_vote_type === 1 ? 'upvote' : 
+                     issue.user_vote_type === -1 ? 'downvote' : null
+      };
+    } else {
+      issue.user_vote_status = null;
+    }
+    
     return issue;
   },
 
   // Get issues with filters and pagination
-  async getIssues(filters = {}, page = 1, limit = 10) {
+  async getIssues(filters = {}, page = 1, limit = 10, currentUserId = null) {
     const { offset, limit: limitInt } = getPagination(page, limit);
     const {
       status,
@@ -166,7 +197,7 @@ const issueService = {
     const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
     const orderBy = nearLat && nearLng ? 'ORDER BY distance ASC, i.created_at DESC' : 'ORDER BY i.created_at DESC';
     
-    // Get total count
+    // Get total count (use current queryParams without vote parameters)
     const countQuery = `
       SELECT COUNT(*) as total
       FROM issues i
@@ -176,7 +207,21 @@ const issueService = {
     const countResult = await query(countQuery, queryParams);
     const totalCount = parseInt(countResult.rows[0].total);
     
-    // Get issues
+    // Now add vote parameters for the main query
+    let voteSelectClause = '';
+    let mainQueryParams = [...queryParams]; // Copy existing params
+    let voteParamIndex = paramIndex;
+    
+    if (currentUserId) {
+      voteSelectClause = `, 
+        (SELECT vote_type FROM issue_votes WHERE issue_id = i.id AND user_id = $${voteParamIndex}) as user_vote_type,
+        CASE WHEN (SELECT vote_type FROM issue_votes WHERE issue_id = i.id AND user_id = $${voteParamIndex + 1}) IS NOT NULL THEN true ELSE false END as user_has_voted`;
+      mainQueryParams.push(currentUserId, currentUserId);
+      voteParamIndex += 2;
+    } else {
+      voteSelectClause = ', NULL as user_vote_type, false as user_has_voted';
+    }
+    
     const issuesQuery = `
       SELECT 
         i.*,
@@ -190,18 +235,19 @@ const issueService = {
         (SELECT media_url FROM issue_media WHERE issue_id = i.id AND is_thumbnail = true AND moderation_status != 'REJECTED' LIMIT 1) as thumbnail_url,
         (SELECT media_url FROM issue_media WHERE issue_id = i.id AND moderation_status != 'REJECTED' ORDER BY created_at ASC LIMIT 1) as first_media_url,
         (SELECT media_type FROM issue_media WHERE issue_id = i.id AND moderation_status != 'REJECTED' ORDER BY created_at ASC LIMIT 1) as first_media_type
+        ${voteSelectClause}
         ${distanceSelect}
       FROM issues i
       LEFT JOIN users u ON i.user_id = u.id
       LEFT JOIN issue_categories ic ON i.category_id = ic.id
       ${whereClause}
       ${orderBy}
-      LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
+      LIMIT $${voteParamIndex} OFFSET $${voteParamIndex + 1}
     `;
     
-    queryParams.push(limitInt, offset);
+    mainQueryParams.push(limitInt, offset);
     
-    const issuesResult = await query(issuesQuery, queryParams);
+    const issuesResult = await query(issuesQuery, mainQueryParams);
     
     // Optionally include media previews for list view
     const issuesWithMedia = issuesResult.rows.map(issue => ({
@@ -212,7 +258,13 @@ const issueService = {
         first_media: issue.first_media_url,
         first_media_type: issue.first_media_type,
         total_count: parseInt(issue.media_count)
-      }
+      },
+      user_vote_status: currentUserId ? {
+        hasVoted: issue.user_has_voted,
+        voteType: issue.user_vote_type || null,
+        voteTypeText: issue.user_vote_type === 1 ? 'upvote' : 
+                     issue.user_vote_type === -1 ? 'downvote' : null
+      } : null
     }));
 
     return {
@@ -374,6 +426,79 @@ const issueService = {
     return result;
   },
 
+  // Get user vote status for an issue
+  async getUserVoteStatus(issueId, userId) {
+    const result = await query(
+      'SELECT vote_type FROM issue_votes WHERE issue_id = $1 AND user_id = $2',
+      [issueId, userId]
+    );
+    
+    if (result.rows.length === 0) {
+      return { hasVoted: false, voteType: null };
+    }
+    
+    return { 
+      hasVoted: true, 
+      voteType: result.rows[0].vote_type,
+      voteTypeText: result.rows[0].vote_type === 1 ? 'upvote' : 'downvote'
+    };
+  },
+
+  // Delete user vote on an issue
+  async deleteVote(issueId, userId) {
+    const result = await transaction(async (client) => {
+      // Check if user has voted
+      const existingVoteResult = await client.query(
+        'SELECT vote_type FROM issue_votes WHERE issue_id = $1 AND user_id = $2',
+        [issueId, userId]
+      );
+      
+      if (existingVoteResult.rows.length === 0) {
+        throw new Error('You have not voted on this issue');
+      }
+      
+      const existingVote = existingVoteResult.rows[0];
+      
+      // Delete the vote
+      await client.query(
+        'DELETE FROM issue_votes WHERE issue_id = $1 AND user_id = $2',
+        [issueId, userId]
+      );
+      
+      // Calculate reputation change (reverse of original vote)
+      const reputationChange = existingVote.vote_type === 1 ? -2 : 1;
+      
+      // Update vote score
+      const voteScoreResult = await client.query(
+        `UPDATE issues 
+         SET vote_score = (
+           SELECT COALESCE(SUM(vote_type), 0) 
+           FROM issue_votes 
+           WHERE issue_id = $1
+         )
+         WHERE id = $1
+         RETURNING vote_score`,
+        [issueId]
+      );
+      
+      // Update issue creator's reputation
+      await client.query(
+        `UPDATE users 
+         SET reputation_score = reputation_score + $1 
+         WHERE id = (SELECT user_id FROM issues WHERE id = $2)`,
+        [reputationChange, issueId]
+      );
+      
+      return { 
+        voteScore: voteScoreResult.rows[0].vote_score, 
+        reputationChange,
+        deletedVoteType: existingVote.vote_type
+      };
+    });
+    
+    return result;
+  },
+
   // Get issue categories
   async getCategories() {
     const result = await query(
@@ -464,15 +589,29 @@ const issueService = {
       dateRange, // { start, end }
       stewardId,
       userId,
+      currentUserId, // Add current user ID for vote status
       search,
       limit = 50,
       offset = 0
     } = filters;
 
+    // Build vote status clause and add parameters
+    let voteSelectClause = '';
+    let voteParams = [];
+    if (currentUserId) {
+      voteSelectClause = `, 
+        (SELECT vote_type FROM issue_votes WHERE issue_id = i.id AND user_id = $${params.length + 1}) as user_vote_type,
+        CASE WHEN (SELECT vote_type FROM issue_votes WHERE issue_id = i.id AND user_id = $${params.length + 2}) IS NOT NULL THEN true ELSE false END as user_has_voted`;
+      voteParams = [currentUserId, currentUserId];
+    } else {
+      voteSelectClause = ', NULL as user_vote_type, false as user_has_voted';
+    }
+
     let baseQuery = `
       SELECT i.*, u.full_name as user_name, ic.name as category_name,
              COUNT(c.id) as comment_count,
-             COUNT(im.id) as media_count,
+             COUNT(im.id) as media_count
+             ${voteSelectClause},
              CASE 
                WHEN i.vote_score >= 50 THEN 'critical'
                WHEN i.vote_score >= 20 THEN 'high'
@@ -488,8 +627,8 @@ const issueService = {
     `;
 
     const conditions = [];
-    const params = [];
-    let paramIndex = 1;
+    const params = [...voteParams];
+    let paramIndex = params.length + 1; // Start after vote parameters
 
     // Status filter
     if (status && Array.isArray(status)) {
@@ -595,7 +734,19 @@ const issueService = {
     params.push(limit, offset);
 
     const result = await query(baseQuery, params);
-    return result.rows;
+    
+    // Add user vote status to each issue
+    const issuesWithVoteStatus = result.rows.map(issue => ({
+      ...issue,
+      user_vote_status: filters.currentUserId ? {
+        hasVoted: issue.user_has_voted,
+        voteType: issue.user_vote_type || null,
+        voteTypeText: issue.user_vote_type === 1 ? 'upvote' : 
+                     issue.user_vote_type === -1 ? 'downvote' : null
+      } : null
+    }));
+    
+    return issuesWithVoteStatus;
   },
 
   // Get issue statistics
@@ -623,15 +774,28 @@ const issueService = {
   },
 
   // Get trending issues (high engagement)
-  async getTrendingIssues(limit = 20) {
-    const cacheKey = cacheService.generateKey('trending_issues', limit);
+  async getTrendingIssues(limit = 20, currentUserId = null) {
+    const cacheKey = cacheService.generateKey('trending_issues', limit, currentUserId);
     
     return await cacheService.cached(cacheKey, async () => {
+      let voteSelectClause = '';
+      let queryParams = [limit];
+      
+      if (currentUserId) {
+        voteSelectClause = `, 
+          (SELECT vote_type FROM issue_votes WHERE issue_id = i.id AND user_id = $2) as user_vote_type,
+          CASE WHEN (SELECT vote_type FROM issue_votes WHERE issue_id = i.id AND user_id = $3) IS NOT NULL THEN true ELSE false END as user_has_voted`;
+        queryParams = [limit, currentUserId, currentUserId];
+      } else {
+        voteSelectClause = ', NULL as user_vote_type, false as user_has_voted';
+      }
+      
       const result = await query(`
         SELECT i.*, u.full_name as user_name, ic.name as category_name,
                COUNT(c.id) as comment_count,
                COUNT(im.id) as media_count,
-               COUNT(iv.user_id) as vote_count,
+               COUNT(iv.user_id) as vote_count
+               ${voteSelectClause},
                (COUNT(c.id) * 2 + COUNT(iv.user_id) + i.vote_score) as engagement_score
         FROM issues i
         LEFT JOIN users u ON i.user_id = u.id
@@ -643,9 +807,20 @@ const issueService = {
         GROUP BY i.id, u.full_name, ic.name
         ORDER BY engagement_score DESC, i.vote_score DESC
         LIMIT $1
-      `, [limit]);
+      `, queryParams);
       
-      return result.rows;
+      // Add user vote status to each issue
+      const issuesWithVoteStatus = result.rows.map(issue => ({
+        ...issue,
+        user_vote_status: currentUserId ? {
+          hasVoted: issue.user_has_voted,
+          voteType: issue.user_vote_type || null,
+          voteTypeText: issue.user_vote_type === 1 ? 'upvote' : 
+                       issue.user_vote_type === -1 ? 'downvote' : null
+        } : null
+      }));
+      
+      return issuesWithVoteStatus;
     }, 600);
   },
 
@@ -672,11 +847,24 @@ const issueService = {
   },
 
   // Get issues requiring steward attention
-  async getIssuesRequiringAttention(stewardId) {
+  async getIssuesRequiringAttention(stewardId, currentUserId = null) {
+    let voteSelectClause = '';
+    let queryParams = [stewardId];
+    
+    if (currentUserId) {
+      voteSelectClause = `, 
+        (SELECT vote_type FROM issue_votes WHERE issue_id = i.id AND user_id = $2) as user_vote_type,
+        CASE WHEN (SELECT vote_type FROM issue_votes WHERE issue_id = i.id AND user_id = $3) IS NOT NULL THEN true ELSE false END as user_has_voted`;
+      queryParams = [stewardId, currentUserId, currentUserId];
+    } else {
+      voteSelectClause = ', NULL as user_vote_type, false as user_has_voted';
+    }
+    
     const result = await query(`
       SELECT i.*, u.full_name as user_name, ic.name as category_name,
              COUNT(c.id) as comment_count,
-             COUNT(sn.id) as steward_notes_count,
+             COUNT(sn.id) as steward_notes_count
+             ${voteSelectClause},
              EXTRACT(EPOCH FROM (NOW() - i.created_at))/3600 as hours_old
       FROM issues i
       LEFT JOIN users u ON i.user_id = u.id
@@ -698,9 +886,20 @@ const issueService = {
       GROUP BY i.id, u.full_name, ic.name, sza.user_id
       ORDER BY i.vote_score DESC, i.created_at ASC
       LIMIT 20
-    `, [stewardId]);
+    `, queryParams);
 
-    return result.rows;
+    // Add user vote status to each issue
+    const issuesWithVoteStatus = result.rows.map(issue => ({
+      ...issue,
+      user_vote_status: currentUserId ? {
+        hasVoted: issue.user_has_voted,
+        voteType: issue.user_vote_type || null,
+        voteTypeText: issue.user_vote_type === 1 ? 'upvote' : 
+                     issue.user_vote_type === -1 ? 'downvote' : null
+      } : null
+    }));
+
+    return issuesWithVoteStatus;
   },
 
   // Get issue categories with statistics
