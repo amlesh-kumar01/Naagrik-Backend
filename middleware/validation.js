@@ -95,7 +95,11 @@ const createCommentValidation = [
   body('content')
     .trim()
     .isLength({ min: 1, max: 1000 })
-    .withMessage('Comment must be between 1 and 1000 characters')
+    .withMessage('Comment must be between 1 and 1000 characters'),
+  body('parentCommentId')
+    .optional()
+    .isUUID()
+    .withMessage('Parent comment ID must be a valid UUID if provided')
 ];
 
 const voteValidation = [
@@ -218,6 +222,35 @@ const removeMediaValidation = [
     .withMessage('Valid media ID is required')
 ];
 
+const flagCommentValidation = [
+  param('commentId')
+    .isUUID()
+    .withMessage('Valid comment ID is required'),
+  body('reason')
+    .optional()
+    .isIn(['SPAM', 'INAPPROPRIATE', 'MISLEADING', 'HARASSMENT', 'OTHER'])
+    .withMessage('Invalid flag reason'),
+  body('details')
+    .optional()
+    .trim()
+    .isLength({ max: 500 })
+    .withMessage('Details must not exceed 500 characters')
+];
+
+const reviewFlagValidation = [
+  param('commentId')
+    .isUUID()
+    .withMessage('Valid comment ID is required'),
+  body('action')
+    .isIn(['APPROVE', 'DELETE'])
+    .withMessage('Action must be APPROVE or DELETE'),
+  body('feedback')
+    .optional()
+    .trim()
+    .isLength({ max: 1000 })
+    .withMessage('Feedback must not exceed 1000 characters')
+];
+
 module.exports = {
   registerValidation,
   loginValidation,
@@ -236,5 +269,7 @@ module.exports = {
   findSimilarIssuesValidation,
   addMediaToIssueValidation,
   updateIssueThumbnailValidation,
-  removeMediaValidation
+  removeMediaValidation,
+  flagCommentValidation,
+  reviewFlagValidation
 };
