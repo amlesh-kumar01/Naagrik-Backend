@@ -142,6 +142,191 @@ const userController = {
     } catch (error) {
       next(error);
     }
+  },
+
+  // Admin features
+  async getAllUsers(req, res, next) {
+    try {
+      const { role, limit, offset, sortBy, sortOrder } = req.query;
+      
+      const filters = {
+        role,
+        limit: parseInt(limit) || 50,
+        offset: parseInt(offset) || 0,
+        sortBy,
+        sortOrder
+      };
+      
+      const users = await userService.getAllUsers(filters);
+      
+      res.json(formatApiResponse(
+        true,
+        { users },
+        'Users retrieved successfully'
+      ));
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  async getUserActivitySummary(req, res, next) {
+    try {
+      const { id } = req.params;
+      
+      const activity = await userService.getUserActivitySummary(id);
+      
+      res.json(formatApiResponse(
+        true,
+        { activity },
+        'User activity summary retrieved successfully'
+      ));
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  async updateUserReputation(req, res, next) {
+    try {
+      const { id } = req.params;
+      const { change, reason } = req.body;
+      
+      if (!reason) {
+        return res.status(400).json(formatApiResponse(
+          false,
+          null,
+          'Reason is required for reputation changes'
+        ));
+      }
+      
+      const user = await userService.updateReputation(id, change, reason);
+      
+      res.json(formatApiResponse(
+        true,
+        { user },
+        `User reputation ${change >= 0 ? 'increased' : 'decreased'} by ${Math.abs(change)}`
+      ));
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  async updateUserStatus(req, res, next) {
+    try {
+      const { id } = req.params;
+      const { suspended, reason } = req.body;
+      
+      const result = await userService.updateUserStatus(id, suspended, reason);
+      
+      res.json(formatApiResponse(
+        true,
+        result,
+        `User ${suspended ? 'suspended' : 'unsuspended'} successfully`
+      ));
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  async getUserHistory(req, res, next) {
+    try {
+      const { id } = req.params;
+      const { limit, offset } = req.query;
+      
+      const history = await userService.getUserHistory(
+        id,
+        parseInt(limit) || 50,
+        parseInt(offset) || 0
+      );
+      
+      res.json(formatApiResponse(
+        true,
+        { history },
+        'User history retrieved successfully'
+      ));
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  async getUserStatistics(req, res, next) {
+    try {
+      const stats = await userService.getUserStatistics();
+      
+      res.json(formatApiResponse(
+        true,
+        { stats },
+        'User statistics retrieved successfully'
+      ));
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  async bulkUpdateRole(req, res, next) {
+    try {
+      const { userIds, role } = req.body;
+      const adminId = req.user.id;
+      
+      // Validate role
+      const validRoles = ['CITIZEN', 'STEWARD', 'SUPER_ADMIN'];
+      if (!validRoles.includes(role)) {
+        return res.status(400).json(formatApiResponse(
+          false,
+          null,
+          'Invalid role'
+        ));
+      }
+      
+      const updatedUsers = await userService.bulkUpdateRole(userIds, role, adminId);
+      
+      res.json(formatApiResponse(
+        true,
+        { updatedUsers },
+        `${updatedUsers.length} users updated successfully`
+      ));
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  async getFilteredUsers(req, res, next) {
+    try {
+      const {
+        role,
+        reputationMin,
+        reputationMax,
+        registeredAfter,
+        registeredBefore,
+        hasIssues,
+        hasBadges,
+        search,
+        limit,
+        offset
+      } = req.query;
+      
+      const filters = {
+        role,
+        reputationMin: reputationMin ? parseInt(reputationMin) : undefined,
+        reputationMax: reputationMax ? parseInt(reputationMax) : undefined,
+        registeredAfter: registeredAfter ? new Date(registeredAfter) : undefined,
+        registeredBefore: registeredBefore ? new Date(registeredBefore) : undefined,
+        hasIssues: hasIssues === 'true',
+        hasBadges: hasBadges === 'true',
+        search,
+        limit: parseInt(limit) || 50,
+        offset: parseInt(offset) || 0
+      };
+      
+      const users = await userService.getFilteredUsers(filters);
+      
+      res.json(formatApiResponse(
+        true,
+        { users, filters },
+        'Filtered users retrieved successfully'
+      ));
+    } catch (error) {
+      next(error);
+    }
   }
 };
 

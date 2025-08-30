@@ -416,6 +416,212 @@ const issueController = {
     } catch (error) {
       next(error);
     }
+  },
+
+  // Advanced filtering for issues
+  async getIssuesWithFilters(req, res, next) {
+    try {
+      const {
+        status,
+        category,
+        priority,
+        lat,
+        lng,
+        radius,
+        startDate,
+        endDate,
+        search,
+        limit,
+        offset
+      } = req.query;
+
+      const filters = {
+        status: status ? (Array.isArray(status) ? status : [status]) : undefined,
+        category: category ? parseInt(category) : undefined,
+        priority: priority || 'recent',
+        location: lat && lng ? { 
+          lat: parseFloat(lat), 
+          lng: parseFloat(lng), 
+          radius: radius ? parseInt(radius) : 5000 
+        } : undefined,
+        dateRange: startDate || endDate ? {
+          start: startDate ? new Date(startDate) : undefined,
+          end: endDate ? new Date(endDate) : undefined
+        } : undefined,
+        search,
+        limit: parseInt(limit) || 50,
+        offset: parseInt(offset) || 0
+      };
+
+      const issues = await issueService.getIssuesWithFilters(filters);
+
+      res.json(formatApiResponse(
+        true,
+        { 
+          issues,
+          filters: filters,
+          total: issues.length
+        },
+        'Filtered issues retrieved successfully'
+      ));
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  // Get trending issues
+  async getTrendingIssues(req, res, next) {
+    try {
+      const { limit } = req.query;
+      
+      const issues = await issueService.getTrendingIssues(parseInt(limit) || 20);
+
+      res.json(formatApiResponse(
+        true,
+        { issues },
+        'Trending issues retrieved successfully'
+      ));
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  // Get issue statistics
+  async getIssueStatistics(req, res, next) {
+    try {
+      const stats = await issueService.getIssueStatistics();
+
+      res.json(formatApiResponse(
+        true,
+        { stats },
+        'Issue statistics retrieved successfully'
+      ));
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  // Bulk update issue status (Admin/Steward only)
+  async bulkUpdateStatus(req, res, next) {
+    try {
+      const { issueIds, status, reason } = req.body;
+      const userId = req.user.id;
+
+      // Validate status
+      const validStatuses = ['OPEN', 'ACKNOWLEDGED', 'IN_PROGRESS', 'RESOLVED', 'ARCHIVED', 'DUPLICATE'];
+      if (!validStatuses.includes(status)) {
+        return res.status(400).json(formatApiResponse(
+          false,
+          null,
+          'Invalid status'
+        ));
+      }
+
+      const updatedIssues = await issueService.bulkUpdateStatus(issueIds, status, userId, reason);
+
+      res.json(formatApiResponse(
+        true,
+        { 
+          updated: updatedIssues.length,
+          issues: updatedIssues
+        },
+        `${updatedIssues.length} issues updated successfully`
+      ));
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  // Get issues requiring steward attention
+  async getIssuesRequiringAttention(req, res, next) {
+    try {
+      const stewardId = req.user.id;
+      
+      const issues = await issueService.getIssuesRequiringAttention(stewardId);
+
+      res.json(formatApiResponse(
+        true,
+        { issues },
+        'Issues requiring attention retrieved successfully'
+      ));
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  // Get categories with statistics
+  async getCategoriesWithStats(req, res, next) {
+    try {
+      const categories = await issueService.getCategoriesWithStats();
+
+      res.json(formatApiResponse(
+        true,
+        { categories },
+        'Categories with statistics retrieved successfully'
+      ));
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  // Get issues by location
+  async getIssuesByLocation(req, res, next) {
+    try {
+      const { lat, lng, radius = 5000, status, limit = 50 } = req.query;
+
+      if (!lat || !lng) {
+        return res.status(400).json(formatApiResponse(
+          false,
+          null,
+          'Latitude and longitude are required'
+        ));
+      }
+
+      const filters = {
+        location: {
+          lat: parseFloat(lat),
+          lng: parseFloat(lng),
+          radius: parseInt(radius)
+        },
+        status: status ? [status] : undefined,
+        limit: parseInt(limit)
+      };
+
+      const issues = await issueService.getIssuesWithFilters(filters);
+
+      res.json(formatApiResponse(
+        true,
+        { issues },
+        'Location-based issues retrieved successfully'
+      ));
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  // Get my issues (for current user)
+  async getMyIssues(req, res, next) {
+    try {
+      const userId = req.user.id;
+      const { status, limit, offset } = req.query;
+
+      const filters = {
+        userId,
+        status: status ? [status] : undefined,
+        limit: parseInt(limit) || 50,
+        offset: parseInt(offset) || 0
+      };
+
+      const issues = await issueService.getIssuesWithFilters(filters);
+
+      res.json(formatApiResponse(
+        true,
+        { issues },
+        'Your issues retrieved successfully'
+      ));
+    } catch (error) {
+      next(error);
+    }
   }
 };
 

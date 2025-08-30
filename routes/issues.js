@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const issueController = require('../controllers/issueController');
-const { authenticateToken, requireSteward, optionalAuth } = require('../middleware/auth');
+const { authenticateToken, requireSteward, requireAdmin, optionalAuth } = require('../middleware/auth');
 const rateLimitService = require('../services/redis/rateLimitService');
 const { handleValidationErrors } = require('../middleware/errors');
 const {
@@ -15,6 +15,27 @@ const {
   updateIssueThumbnailValidation,
   removeMediaValidation
 } = require('../middleware/validation');
+const { body, query } = require('express-validator');
+
+// Additional validation for new endpoints
+const bulkUpdateValidation = [
+  body('issueIds').isArray().withMessage('Issue IDs must be an array'),
+  body('issueIds.*').isUUID().withMessage('Each issue ID must be a valid UUID'),
+  body('status').isIn(['OPEN', 'ACKNOWLEDGED', 'IN_PROGRESS', 'RESOLVED', 'ARCHIVED', 'DUPLICATE']).withMessage('Invalid status'),
+  body('reason').optional().trim().isLength({ max: 500 }).withMessage('Reason must be less than 500 characters')
+];
+
+const locationFilterValidation = [
+  query('lat').isFloat({ min: -90, max: 90 }).withMessage('Latitude must be between -90 and 90'),
+  query('lng').isFloat({ min: -180, max: 180 }).withMessage('Longitude must be between -180 and 180'),
+  query('radius').optional().isInt({ min: 100, max: 50000 }).withMessage('Radius must be between 100 and 50000 meters')
+];
+
+const advancedFilterValidation = [
+  query('priority').optional().isIn(['recent', 'votes', 'urgent', 'oldest']).withMessage('Invalid priority filter'),
+  query('limit').optional().isInt({ min: 1, max: 100 }).withMessage('Limit must be between 1 and 100'),
+  query('offset').optional().isInt({ min: 0 }).withMessage('Offset must be non-negative')
+];
 
 // Public/Optional auth routes
 router.get('/', 
@@ -26,6 +47,48 @@ router.get('/',
 
 router.get('/categories', 
   issueController.getCategories
+);
+
+// New filtering and analytics endpoints
+router.get('/filter/advanced', 
+  optionalAuth,
+  advancedFilterValidation,
+  handleValidationErrors,
+  issueController.getIssuesWithFilters
+);
+
+router.get('/analytics/trending', 
+  optionalAuth,
+  issueController.getTrendingIssues
+);
+
+router.get('/analytics/statistics', 
+  optionalAuth,
+  issueController.getIssueStatistics
+);
+
+router.get('/analytics/categories', 
+  optionalAuth,
+  issueController.getCategoriesWithStats
+);
+
+router.get('/filter/location', 
+  optionalAuth,
+  locationFilterValidation,
+  handleValidationErrors,
+  issueController.getIssuesByLocation
+);
+
+// User-specific routes
+router.get('/my/issues', 
+  authenticateToken,
+  issueController.getMyIssues
+);
+
+router.get('/steward/attention', 
+  authenticateToken,
+  requireSteward,
+  issueController.getIssuesRequiringAttention
 );
 
 router.get('/:id', 
@@ -110,6 +173,15 @@ router.post('/:id/mark-duplicate',
   markDuplicateValidation,
   handleValidationErrors,
   issueController.markAsDuplicate
+);
+
+// Bulk operations (Admin/Steward only)
+router.put('/bulk/status', 
+  authenticateToken,
+  requireSteward,
+  bulkUpdateValidation,
+  handleValidationErrors,
+  issueController.bulkUpdateStatus
 );
 
 module.exports = router;

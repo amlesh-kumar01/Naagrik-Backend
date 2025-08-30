@@ -2,6 +2,7 @@ const { query, transaction } = require('../config/database');
 const { getPagination, getPaginationInfo } = require('../utils/helpers');
 const userService = require('./userService');
 const mediaService = require('./mediaService');
+const cacheService = require('./redis/cacheService');
 
 const issueService = {
   // Create a new issue
@@ -451,6 +452,277 @@ const issueService = {
   // Get all media for an issue
   async getIssueMedia(issueId) {
     return await mediaService.getIssueMedia(issueId);
+  },
+
+  // Advanced filtering for issues
+  async getIssuesWithFilters(filters = {}) {
+    const {
+      status,
+      category,
+      priority = 'recent', // recent, votes, urgent, oldest
+      location, // { lat, lng, radius }
+      dateRange, // { start, end }
+      stewardId,
+      userId,
+      search,
+      limit = 50,
+      offset = 0
+    } = filters;
+
+    let baseQuery = `
+      SELECT i.*, u.full_name as user_name, ic.name as category_name,
+             COUNT(c.id) as comment_count,
+             COUNT(im.id) as media_count,
+             CASE 
+               WHEN i.vote_score >= 50 THEN 'critical'
+               WHEN i.vote_score >= 20 THEN 'high'
+               WHEN i.vote_score >= 5 THEN 'medium'
+               ELSE 'low'
+             END as priority_level,
+             EXTRACT(EPOCH FROM (NOW() - i.created_at))/3600 as hours_old
+      FROM issues i
+      LEFT JOIN users u ON i.user_id = u.id
+      LEFT JOIN issue_categories ic ON i.category_id = ic.id
+      LEFT JOIN comments c ON i.id = c.issue_id
+      LEFT JOIN issue_media im ON i.id = im.issue_id
+    `;
+
+    const conditions = [];
+    const params = [];
+    let paramIndex = 1;
+
+    // Status filter
+    if (status && Array.isArray(status)) {
+      conditions.push(`i.status = ANY($${paramIndex})`);
+      params.push(status);
+      paramIndex++;
+    } else if (status) {
+      conditions.push(`i.status = $${paramIndex}`);
+      params.push(status);
+      paramIndex++;
+    }
+
+    // Category filter
+    if (category) {
+      conditions.push(`i.category_id = $${paramIndex}`);
+      params.push(category);
+      paramIndex++;
+    }
+
+    // Location filter
+    if (location && location.lat && location.lng) {
+      const radius = location.radius || 5000; // 5km default
+      conditions.push(`ST_DWithin(
+        ST_SetSRID(ST_MakePoint(i.location_lng, i.location_lat), 4326),
+        ST_SetSRID(ST_MakePoint($${paramIndex}, $${paramIndex + 1}), 4326),
+        $${paramIndex + 2}
+      )`);
+      params.push(location.lng, location.lat, radius);
+      paramIndex += 3;
+    }
+
+    // Date range filter
+    if (dateRange) {
+      if (dateRange.start) {
+        conditions.push(`i.created_at >= $${paramIndex}`);
+        params.push(dateRange.start);
+        paramIndex++;
+      }
+      if (dateRange.end) {
+        conditions.push(`i.created_at <= $${paramIndex}`);
+        params.push(dateRange.end);
+        paramIndex++;
+      }
+    }
+
+    // Steward zone filter
+    if (stewardId) {
+      baseQuery += `
+      INNER JOIN steward_zone_assignments sza ON ST_DWithin(
+        ST_SetSRID(ST_MakePoint(i.location_lng, i.location_lat), 4326),
+        ST_SetSRID(ST_MakePoint(-73.9857, 40.7484), 4326),
+        10000
+      )`;
+      conditions.push(`sza.user_id = $${paramIndex}`);
+      params.push(stewardId);
+      paramIndex++;
+    }
+
+    // User filter
+    if (userId) {
+      conditions.push(`i.user_id = $${paramIndex}`);
+      params.push(userId);
+      paramIndex++;
+    }
+
+    // Search filter
+    if (search) {
+      conditions.push(`(i.title ILIKE $${paramIndex} OR i.description ILIKE $${paramIndex})`);
+      params.push(`%${search}%`);
+      paramIndex++;
+    }
+
+    // Add WHERE clause
+    if (conditions.length > 0) {
+      baseQuery += ` WHERE ${conditions.join(' AND ')}`;
+    }
+
+    // Add GROUP BY
+    baseQuery += ` GROUP BY i.id, u.full_name, ic.name`;
+
+    // Priority/ordering
+    let orderClause;
+    switch (priority) {
+      case 'votes':
+        orderClause = 'ORDER BY i.vote_score DESC, i.created_at DESC';
+        break;
+      case 'urgent':
+        orderClause = 'ORDER BY i.vote_score DESC, i.created_at ASC';
+        break;
+      case 'oldest':
+        orderClause = 'ORDER BY i.created_at ASC';
+        break;
+      case 'recent':
+      default:
+        orderClause = 'ORDER BY i.created_at DESC';
+        break;
+    }
+
+    baseQuery += ` ${orderClause}`;
+
+    // Add pagination
+    baseQuery += ` LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
+    params.push(limit, offset);
+
+    const result = await query(baseQuery, params);
+    return result.rows;
+  },
+
+  // Get issue statistics
+  async getIssueStatistics() {
+    const cacheKey = cacheService.generateKey('issue_statistics');
+    
+    return await cacheService.cached(cacheKey, async () => {
+      const result = await query(`
+        SELECT 
+          COUNT(*) as total_issues,
+          COUNT(CASE WHEN status = 'OPEN' THEN 1 END) as open_issues,
+          COUNT(CASE WHEN status = 'IN_PROGRESS' THEN 1 END) as in_progress_issues,
+          COUNT(CASE WHEN status = 'RESOLVED' THEN 1 END) as resolved_issues,
+          COUNT(CASE WHEN created_at >= NOW() - INTERVAL '24 hours' THEN 1 END) as issues_today,
+          COUNT(CASE WHEN created_at >= NOW() - INTERVAL '7 days' THEN 1 END) as issues_this_week,
+          AVG(vote_score) as avg_vote_score,
+          MAX(vote_score) as highest_vote_score,
+          COUNT(CASE WHEN vote_score >= 50 THEN 1 END) as critical_issues,
+          COUNT(CASE WHEN vote_score >= 20 THEN 1 END) as high_priority_issues
+        FROM issues
+      `);
+      
+      return result.rows[0];
+    }, 300);
+  },
+
+  // Get trending issues (high engagement)
+  async getTrendingIssues(limit = 20) {
+    const cacheKey = cacheService.generateKey('trending_issues', limit);
+    
+    return await cacheService.cached(cacheKey, async () => {
+      const result = await query(`
+        SELECT i.*, u.full_name as user_name, ic.name as category_name,
+               COUNT(c.id) as comment_count,
+               COUNT(im.id) as media_count,
+               COUNT(iv.user_id) as vote_count,
+               (COUNT(c.id) * 2 + COUNT(iv.user_id) + i.vote_score) as engagement_score
+        FROM issues i
+        LEFT JOIN users u ON i.user_id = u.id
+        LEFT JOIN issue_categories ic ON i.category_id = ic.id
+        LEFT JOIN comments c ON i.id = c.issue_id AND c.created_at >= NOW() - INTERVAL '7 days'
+        LEFT JOIN issue_votes iv ON i.id = iv.issue_id AND iv.created_at >= NOW() - INTERVAL '7 days'
+        LEFT JOIN issue_media im ON i.id = im.issue_id
+        WHERE i.created_at >= NOW() - INTERVAL '30 days'
+        GROUP BY i.id, u.full_name, ic.name
+        ORDER BY engagement_score DESC, i.vote_score DESC
+        LIMIT $1
+      `, [limit]);
+      
+      return result.rows;
+    }, 600);
+  },
+
+  // Bulk update issue status
+  async bulkUpdateStatus(issueIds, newStatus, userId, reason = null) {
+    return await transaction(async (client) => {
+      // Update issues
+      const updateResult = await client.query(
+        'UPDATE issues SET status = $1, updated_at = NOW() WHERE id = ANY($2) RETURNING *',
+        [newStatus, issueIds]
+      );
+
+      // Add history entries
+      for (const issue of updateResult.rows) {
+        await client.query(
+          `INSERT INTO issue_history (issue_id, user_id, old_status, new_status, change_reason)
+           VALUES ($1, $2, $3, $4, $5)`,
+          [issue.id, userId, issue.status, newStatus, reason]
+        );
+      }
+
+      return updateResult.rows;
+    });
+  },
+
+  // Get issues requiring steward attention
+  async getIssuesRequiringAttention(stewardId) {
+    const result = await query(`
+      SELECT i.*, u.full_name as user_name, ic.name as category_name,
+             COUNT(c.id) as comment_count,
+             COUNT(sn.id) as steward_notes_count,
+             EXTRACT(EPOCH FROM (NOW() - i.created_at))/3600 as hours_old
+      FROM issues i
+      LEFT JOIN users u ON i.user_id = u.id
+      LEFT JOIN issue_categories ic ON i.category_id = ic.id
+      LEFT JOIN comments c ON i.id = c.issue_id
+      LEFT JOIN steward_notes sn ON i.id = sn.issue_id
+      INNER JOIN steward_zone_assignments sza ON ST_DWithin(
+        ST_SetSRID(ST_MakePoint(i.location_lng, i.location_lat), 4326),
+        ST_SetSRID(ST_MakePoint(-73.9857, 40.7484), 4326),
+        10000
+      )
+      WHERE sza.user_id = $1 
+        AND i.status IN ('OPEN', 'ACKNOWLEDGED', 'IN_PROGRESS')
+        AND (
+          i.vote_score >= 10 
+          OR EXTRACT(EPOCH FROM (NOW() - i.created_at))/3600 >= 48
+          OR COUNT(c.id) >= 5
+        )
+      GROUP BY i.id, u.full_name, ic.name, sza.user_id
+      ORDER BY i.vote_score DESC, i.created_at ASC
+      LIMIT 20
+    `, [stewardId]);
+
+    return result.rows;
+  },
+
+  // Get issue categories with statistics
+  async getCategoriesWithStats() {
+    const cacheKey = cacheService.generateKey('categories_with_stats');
+    
+    return await cacheService.cached(cacheKey, async () => {
+      const result = await query(`
+        SELECT ic.*, 
+               COUNT(i.id) as total_issues,
+               COUNT(CASE WHEN i.status = 'OPEN' THEN 1 END) as open_issues,
+               COUNT(CASE WHEN i.status = 'RESOLVED' THEN 1 END) as resolved_issues,
+               AVG(i.vote_score) as avg_vote_score,
+               COUNT(CASE WHEN i.created_at >= NOW() - INTERVAL '30 days' THEN 1 END) as recent_issues
+        FROM issue_categories ic
+        LEFT JOIN issues i ON ic.id = i.category_id
+        GROUP BY ic.id, ic.name, ic.description
+        ORDER BY total_issues DESC
+      `);
+      
+      return result.rows;
+    }, 900);
   }
 };
 
