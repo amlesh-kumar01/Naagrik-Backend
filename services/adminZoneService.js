@@ -559,13 +559,13 @@ const adminZoneService = {
   async getAvailableZones() {
     return await cacheService.cached('zones:available', async () => {
       const result = await query(`
-        SELECT z.id, z.area_name, z.state, z.pincode, z.district,
+        SELECT z.id, z.area_name, z.state, z.pincode, z.city,
                COUNT(DISTINCT sc.steward_id) as available_stewards,
                COUNT(DISTINCT sc.category_id) as managed_categories
         FROM zones z
         LEFT JOIN steward_categories sc ON z.id = sc.zone_id
         WHERE z.is_active = true
-        GROUP BY z.id, z.area_name, z.state, z.pincode, z.district
+        GROUP BY z.id, z.area_name, z.state, z.pincode, z.city
         HAVING COUNT(DISTINCT sc.steward_id) > 0
         ORDER BY z.area_name
       `);
@@ -583,7 +583,7 @@ const adminZoneService = {
     let paramCount = 0;
     
     if (searchQuery) {
-      whereConditions.push(`(z.area_name ILIKE $${++paramCount} OR z.district ILIKE $${paramCount} OR z.pincode ILIKE $${paramCount})`);
+      whereConditions.push(`(z.area_name ILIKE $${++paramCount} OR z.city ILIKE $${paramCount} OR z.pincode ILIKE $${paramCount})`);
       queryParams.push(`%${searchQuery}%`);
     }
     
@@ -600,7 +600,7 @@ const adminZoneService = {
     queryParams.push(parseInt(limit));
     
     const result = await query(`
-      SELECT z.id, z.area_name, z.state, z.pincode, z.district,
+      SELECT z.id, z.area_name, z.state, z.pincode, z.city,
              COUNT(DISTINCT sc.steward_id) as available_stewards,
              COUNT(DISTINCT sc.category_id) as managed_categories,
              COUNT(DISTINCT i.id) as total_issues
@@ -608,7 +608,7 @@ const adminZoneService = {
       LEFT JOIN steward_categories sc ON z.id = sc.zone_id
       LEFT JOIN issues i ON z.id = i.zone_id
       WHERE ${whereConditions.join(' AND ')}
-      GROUP BY z.id, z.area_name, z.state, z.pincode, z.district
+      GROUP BY z.id, z.area_name, z.state, z.pincode, z.city
       ORDER BY z.area_name
       LIMIT $${paramCount + 1}
     `, queryParams);

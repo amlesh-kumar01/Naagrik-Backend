@@ -10,7 +10,7 @@ const createZoneValidation = [
   body('area_name').trim().isLength({ min: 1, max: 100 }).withMessage('Area name is required and must be less than 100 characters'),
   body('state').trim().isLength({ min: 1, max: 50 }).withMessage('State is required and must be less than 50 characters'),
   body('pincode').isLength({ min: 6, max: 6 }).withMessage('Pincode must be exactly 6 digits'),
-  body('district').optional().trim().isLength({ max: 50 }).withMessage('District must be less than 50 characters')
+  body('city').optional().trim().isLength({ max: 50 }).withMessage('City must be less than 50 characters')
 ];
 
 const updateZoneValidation = [
@@ -18,7 +18,7 @@ const updateZoneValidation = [
   body('area_name').trim().isLength({ min: 1, max: 100 }).withMessage('Area name is required and must be less than 100 characters'),
   body('state').trim().isLength({ min: 1, max: 50 }).withMessage('State is required and must be less than 50 characters'),
   body('pincode').isLength({ min: 6, max: 6 }).withMessage('Pincode must be exactly 6 digits'),
-  body('district').optional().trim().isLength({ max: 50 }).withMessage('District must be less than 50 characters')
+  body('city').optional().trim().isLength({ max: 50 }).withMessage('City must be less than 50 characters')
 ];
 
 const zoneIdValidation = [
