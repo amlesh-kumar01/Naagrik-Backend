@@ -15,7 +15,7 @@ const {
   updateIssueThumbnailValidation,
   removeMediaValidation
 } = require('../middleware/validation');
-const { body, query } = require('express-validator');
+const { body, query, param } = require('express-validator');
 
 // Additional validation for new endpoints
 const bulkUpdateValidation = [
@@ -23,6 +23,12 @@ const bulkUpdateValidation = [
   body('issueIds.*').isUUID().withMessage('Each issue ID must be a valid UUID'),
   body('status').isIn(['OPEN', 'ACKNOWLEDGED', 'IN_PROGRESS', 'RESOLVED', 'ARCHIVED', 'DUPLICATE']).withMessage('Invalid status'),
   body('reason').optional().trim().isLength({ max: 500 }).withMessage('Reason must be less than 500 characters')
+];
+
+const hardDeleteIssueValidation = [
+  param('issueId')
+    .isUUID()
+    .withMessage('Valid issue ID is required')
 ];
 
 const locationFilterValidation = [
@@ -150,6 +156,14 @@ router.delete('/:issueId/vote',
 router.delete('/:id', 
   authenticateToken,
   issueController.deleteIssue
+);
+
+// Hard delete route (SUPER_ADMIN or owner only)
+router.delete('/:issueId/hard-delete', 
+  authenticateToken,
+  hardDeleteIssueValidation,
+  handleValidationErrors,
+  issueController.hardDeleteIssue
 );
 
 // Media management routes

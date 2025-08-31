@@ -922,6 +922,79 @@ const issueService = {
       
       return result.rows;
     }, 900);
+  },
+
+  // Hard delete issue with all connected data
+  async hardDeleteIssue(issueId, currentUserId) {
+    return await transaction(async (client) => {
+      // First, get issue details
+      const issueResult = await client.query(
+        'SELECT * FROM issues WHERE id = $1',
+        [issueId]
+      );
+      
+      if (issueResult.rows.length === 0) {
+        throw new Error('Issue not found');
+      }
+      
+      const issue = issueResult.rows[0];
+      
+      // Check permissions - only SUPER_ADMIN or issue owner can hard delete
+      if (currentUserId) {
+        const userResult = await client.query(
+          'SELECT role FROM users WHERE id = $1',
+          [currentUserId]
+        );
+        
+        const userRole = userResult.rows[0]?.role;
+        if (userRole !== 'SUPER_ADMIN' && issue.user_id !== currentUserId) {
+          throw new Error('You do not have permission to permanently delete this issue');
+        }
+      }
+      
+      // Delete from child tables first (due to foreign key constraints)
+      
+      // Delete votes
+      await client.query('DELETE FROM votes WHERE issue_id = $1', [issueId]);
+      
+      // Delete comment flags for comments on this issue
+      await client.query(`
+        DELETE FROM comment_flags 
+        WHERE comment_id IN (
+          SELECT id FROM comments WHERE issue_id = $1
+        )
+      `, [issueId]);
+      
+      // Delete comments (will cascade to nested comments due to CASCADE DELETE)
+      await client.query('DELETE FROM comments WHERE issue_id = $1', [issueId]);
+      
+      // Delete issue history
+      await client.query('DELETE FROM issue_history WHERE issue_id = $1', [issueId]);
+      
+      // Delete all media using the media service (this handles both DB and Cloudinary)
+      const mediaService = require('./mediaService');
+      const mediaDeletionResult = await mediaService.deleteAllIssueMedia(issueId);
+      
+      // Delete the main issue
+      await client.query('DELETE FROM issues WHERE id = $1', [issueId]);
+      
+      // Clear related caches
+      const cacheService = require('./redis/cacheService');
+      await cacheService.invalidatePattern(`issue_${issueId}*`);
+      await cacheService.invalidatePattern('issues_*');
+      await cacheService.invalidatePattern('dashboard_*');
+      
+      return {
+        success: true,
+        message: 'Issue and all connected data permanently deleted',
+        deletedData: {
+          issue: issue,
+          mediaFiles: mediaDeletionResult.deletedMediaCount,
+          cloudinaryCleanup: mediaDeletionResult.cloudinaryDeletions,
+          cleanupCompleted: true
+        }
+      };
+    });
   }
 };
 

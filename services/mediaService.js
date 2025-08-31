@@ -1,5 +1,5 @@
 const { query, transaction } = require('../config/database');
-const { deleteAsset, uploadImage, uploadVideo } = require('../utils/cloudinary');
+const { deleteAsset, uploadImage, uploadVideo, extractPublicId } = require('../utils/cloudinary');
 
 const mediaService = {
   /**
@@ -196,6 +196,20 @@ const mediaService = {
         [mediaId]
       );
 
+      // Delete from Cloudinary if URL exists
+      if (media.media_url) {
+        try {
+          const publicId = extractPublicId(media.media_url);
+          if (publicId) {
+            const resourceType = media.media_type?.toLowerCase() === 'video' ? 'video' : 'image';
+            await deleteAsset(publicId, resourceType);
+          }
+        } catch (cloudinaryError) {
+          console.error('Error deleting from Cloudinary:', cloudinaryError);
+          // Don't fail the transaction for Cloudinary errors
+        }
+      }
+
       return media;
     });
   },
@@ -377,6 +391,59 @@ const mediaService = {
     );
     
     return result.rows[0];
+  },
+
+  /**
+   * Delete all media for an issue (used for hard delete)
+   */
+  async deleteAllIssueMedia(issueId) {
+    return await transaction(async (client) => {
+      // Get all media for the issue
+      const mediaResult = await client.query(
+        'SELECT * FROM issue_media WHERE issue_id = $1',
+        [issueId]
+      );
+
+      const mediaFiles = mediaResult.rows;
+
+      // Delete database records
+      await client.query(
+        'DELETE FROM issue_media WHERE issue_id = $1',
+        [issueId]
+      );
+
+      // Delete from Cloudinary
+      const deletionResults = [];
+      for (const media of mediaFiles) {
+        if (media.media_url) {
+          try {
+            const publicId = extractPublicId(media.media_url);
+            if (publicId) {
+              const resourceType = media.media_type?.toLowerCase() === 'video' ? 'video' : 'image';
+              const result = await deleteAsset(publicId, resourceType);
+              deletionResults.push({
+                mediaId: media.id,
+                publicId,
+                success: true,
+                result
+              });
+            }
+          } catch (cloudinaryError) {
+            console.error(`Error deleting media ${media.id} from Cloudinary:`, cloudinaryError);
+            deletionResults.push({
+              mediaId: media.id,
+              success: false,
+              error: cloudinaryError.message
+            });
+          }
+        }
+      }
+
+      return {
+        deletedMediaCount: mediaFiles.length,
+        cloudinaryDeletions: deletionResults
+      };
+    });
   }
 };
 

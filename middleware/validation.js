@@ -251,6 +251,12 @@ const reviewFlagValidation = [
     .withMessage('Feedback must not exceed 1000 characters')
 ];
 
+const hardDeleteIssueValidation = [
+  param('issueId')
+    .isUUID()
+    .withMessage('Valid issue ID is required')
+];
+
 module.exports = {
   registerValidation,
   loginValidation,
@@ -271,5 +277,6 @@ module.exports = {
   updateIssueThumbnailValidation,
   removeMediaValidation,
   flagCommentValidation,
-  reviewFlagValidation
+  reviewFlagValidation,
+  hardDeleteIssueValidation
 };

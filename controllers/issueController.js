@@ -668,6 +668,46 @@ const issueController = {
     } catch (error) {
       next(error);
     }
+  },
+
+  // Hard delete issue (removes all connected data permanently)
+  async hardDeleteIssue(req, res, next) {
+    try {
+      const { issueId } = req.params;
+      const currentUserId = req.user.id;
+      const userRole = req.user.role;
+      
+      // Check if user has permission to hard delete
+      // Only SUPER_ADMIN or issue owner can hard delete
+      if (userRole !== 'SUPER_ADMIN') {
+        // Check if user is the issue owner
+        const issue = await issueService.getIssueById(issueId, false);
+        if (!issue || issue.user_id !== currentUserId) {
+          return res.status(403).json(formatApiResponse(
+            false,
+            null,
+            'You do not have permission to permanently delete this issue'
+          ));
+        }
+      }
+      
+      const result = await issueService.hardDeleteIssue(issueId, currentUserId);
+      
+      res.json(formatApiResponse(
+        true,
+        result,
+        'Issue permanently deleted with all connected data'
+      ));
+    } catch (error) {
+      if (error.message === 'Issue not found') {
+        return res.status(404).json(formatApiResponse(
+          false,
+          null,
+          'Issue not found'
+        ));
+      }
+      next(error);
+    }
   }
 };
 
