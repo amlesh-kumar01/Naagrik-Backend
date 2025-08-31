@@ -955,7 +955,7 @@ const issueService = {
       // Delete from child tables first (due to foreign key constraints)
       
       // Delete votes
-      await client.query('DELETE FROM votes WHERE issue_id = $1', [issueId]);
+      await client.query('DELETE FROM issue_votes WHERE issue_id = $1', [issueId]);
       
       // Delete comment flags for comments on this issue
       await client.query(`
@@ -980,9 +980,9 @@ const issueService = {
       
       // Clear related caches
       const cacheService = require('./redis/cacheService');
-      await cacheService.invalidatePattern(`issue_${issueId}*`);
-      await cacheService.invalidatePattern('issues_*');
-      await cacheService.invalidatePattern('dashboard_*');
+      await cacheService.delPattern(`issue_${issueId}*`);
+      await cacheService.delPattern('issues_*');
+      await cacheService.delPattern('dashboard_*');
       
       return {
         success: true,
