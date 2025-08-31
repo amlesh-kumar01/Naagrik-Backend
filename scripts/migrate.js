@@ -11,7 +11,14 @@ CREATE EXTENSION IF NOT EXISTS postgis;
 const createEnums = `
 -- 1. DEFINE CUSTOM TYPES (ENUMS)
 DO $$ BEGIN
-  CREATE TYPE user_role AS ENUM ('CITIZEN', 'STEWARD', 'SUPER_ADMIN');
+  CREATE TYPE user_role AS ENUM ('CITIZEN', '    console.log('📋 Creating steward applications table...');
+    await query(createStewardApplicationsTable);
+
+    console.log('📜 Creating issue history table...');
+    await query(createIssueHistoryTable);
+
+    console.log('🔗 Adding constraints...');
+    await query(addConstraints);RD', 'SUPER_ADMIN');
 EXCEPTION
   WHEN duplicate_object THEN null;
 END $$;

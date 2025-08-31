@@ -336,6 +336,34 @@ const stewardController = {
     } catch (error) {
       next(error);
     }
+  },
+
+  // Check and assign issue to steward
+  async checkAndAssignIssue(req, res, next) {
+    try {
+      const stewardId = req.user.id;
+      const { issueId } = req.params;
+      
+      if (!issueId) {
+        return res.status(400).json(formatApiResponse(
+          false,
+          null,
+          'Issue ID is required'
+        ));
+      }
+      
+      const result = await stewardService.checkAndAssignIssue(issueId, stewardId);
+      
+      const statusCode = result.isCurrentSteward ? 200 : 409; // 409 if assigned to someone else
+      
+      res.status(statusCode).json(formatApiResponse(
+        true,
+        result,
+        result.message
+      ));
+    } catch (error) {
+      next(error);
+    }
   }
 };
 

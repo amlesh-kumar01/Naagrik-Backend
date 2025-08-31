@@ -67,6 +67,12 @@ router.get('/stats/me',
   stewardController.getMyStewardStats
 );
 
+router.post('/issues/:issueId/assign', 
+  authenticateToken,
+  requireSteward,
+  stewardController.checkAndAssignIssue
+);
+
 // Admin-only routes
 router.get('/applications/pending', 
   authenticateToken,

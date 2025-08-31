@@ -516,10 +516,13 @@ const stewardService = {
   async getStewardIssues(stewardId, filters = {}) {
     try {
       let whereClause = `
-        WHERE i.category_id IN (
-          SELECT sc.category_id 
+        WHERE EXISTS (
+          SELECT 1 
           FROM steward_categories sc 
-          WHERE sc.steward_id = $1
+          WHERE sc.steward_id = $1 
+          AND sc.category_id = i.category_id 
+          AND sc.zone_id = i.zone_id 
+          AND sc.is_active = true
           ${filters.zoneId ? 'AND sc.zone_id = $' + (Object.keys(filters).filter(k => filters[k] !== undefined).length + 1) : ''}
         )
       `;
@@ -544,17 +547,17 @@ const stewardService = {
         paramIndex++;
       }
       
-      const query = `
-        SELECT i.*, u.first_name, u.last_name, u.email,
+      const queryText = `
+        SELECT i.*, u.full_name, u.email,
                c.name as category_name, z.area_name as zone_name
         FROM issues i
         JOIN users u ON i.user_id = u.id
-        JOIN categories c ON i.category_id = c.id
+        JOIN issue_categories c ON i.category_id = c.id
         JOIN zones z ON i.zone_id = z.id
         ${whereClause}
         ORDER BY 
           CASE 
-            WHEN i.status = 'REPORTED' THEN 1
+            WHEN i.status = 'OPEN' THEN 1
             WHEN i.status = 'IN_PROGRESS' THEN 2
             WHEN i.status = 'RESOLVED' THEN 3
             ELSE 4
@@ -566,7 +569,7 @@ const stewardService = {
       params.push(filters.limit || 50);
       params.push(filters.offset || 0);
       
-      const result = await db.query(query, params);
+      const result = await query(queryText, params);
       return result.rows;
     } catch (error) {
       throw new Error(`Error fetching steward issues: ${error.message}`);
@@ -576,13 +579,13 @@ const stewardService = {
   // Get issues requiring steward attention (urgent/overdue)
   async getIssuesRequiringAttention(stewardId, limit = 20) {
     try {
-      const query = `
-        SELECT i.*, u.first_name, u.last_name, u.email,
+      const queryText = `
+        SELECT i.*, u.full_name, u.email,
                c.name as category_name, z.area_name as zone_name,
                EXTRACT(EPOCH FROM (NOW() - i.created_at))/3600 as hours_old
         FROM issues i
         JOIN users u ON i.user_id = u.id
-        JOIN categories c ON i.category_id = c.id
+        JOIN issue_categories c ON i.category_id = c.id
         JOIN zones z ON i.zone_id = z.id
         WHERE i.category_id IN (
           SELECT sc.category_id 
@@ -590,21 +593,17 @@ const stewardService = {
           WHERE sc.steward_id = $1
         )
         AND (
-          i.priority = 'HIGH' 
-          OR i.status = 'REPORTED' 
+          i.urgency_score >= 8
+          OR i.status = 'OPEN' 
           OR (i.status = 'IN_PROGRESS' AND i.updated_at < NOW() - INTERVAL '3 days')
         )
         ORDER BY 
-          CASE i.priority 
-            WHEN 'HIGH' THEN 1
-            WHEN 'MEDIUM' THEN 2
-            ELSE 3
-          END,
+          i.urgency_score DESC,
           i.created_at ASC
         LIMIT $2
       `;
       
-      const result = await db.query(query, [stewardId, limit]);
+      const result = await query(queryText, [stewardId, limit]);
       return result.rows;
     } catch (error) {
       throw new Error(`Error fetching issues requiring attention: ${error.message}`);
@@ -663,13 +662,13 @@ const stewardService = {
   // Get steward workload summary
   async getStewardWorkload(stewardId) {
     try {
-      const query = `
+      const queryText = `
         SELECT 
           sc.zone_id,
           z.area_name as zone_name,
           sc.category_id,
           c.name as category_name,
-          COUNT(CASE WHEN i.status = 'REPORTED' THEN 1 END) as reported_issues,
+          COUNT(CASE WHEN i.status = 'OPEN' THEN 1 END) as reported_issues,
           COUNT(CASE WHEN i.status = 'IN_PROGRESS' THEN 1 END) as in_progress_issues,
           COUNT(CASE WHEN i.status = 'RESOLVED' THEN 1 END) as resolved_issues,
           COUNT(i.id) as total_issues,
@@ -678,14 +677,14 @@ const stewardService = {
           END) as avg_resolution_hours
         FROM steward_categories sc
         JOIN zones z ON sc.zone_id = z.id
-        JOIN categories c ON sc.category_id = c.id
+        JOIN issue_categories c ON sc.category_id = c.id
         LEFT JOIN issues i ON sc.category_id = i.category_id AND sc.zone_id = i.zone_id
         WHERE sc.steward_id = $1
         GROUP BY sc.zone_id, z.area_name, sc.category_id, c.name
         ORDER BY z.area_name, c.name
       `;
       
-      const result = await db.query(query, [stewardId]);
+      const result = await query(queryText, [stewardId]);
       
       // Group by zone
       const workloadByZone = {};
@@ -724,6 +723,88 @@ const stewardService = {
       return Object.values(workloadByZone);
     } catch (error) {
       throw new Error(`Error fetching steward workload: ${error.message}`);
+    }
+  },
+
+  // Check if issue is assigned and assign if not
+  async checkAndAssignIssue(issueId, stewardId) {
+    try {
+      // First, check if the issue exists and get its current assignment status
+      const issueCheckQuery = `
+        SELECT id, assigned_steward_id, category_id, zone_id, status, title
+        FROM issues 
+        WHERE id = $1
+      `;
+      
+      const issueResult = await query(issueCheckQuery, [issueId]);
+      
+      if (issueResult.rows.length === 0) {
+        throw new Error('Issue not found');
+      }
+      
+      const issue = issueResult.rows[0];
+      
+      // Check if already assigned
+      if (issue.assigned_steward_id) {
+        return {
+          isAssigned: true,
+          assignedTo: issue.assigned_steward_id,
+          isCurrentSteward: issue.assigned_steward_id === stewardId,
+          message: issue.assigned_steward_id === stewardId 
+            ? 'Issue is already assigned to you' 
+            : 'Issue is already assigned to another steward'
+        };
+      }
+      
+      // Check if the steward has authority over this issue (assigned to the category in this zone)
+      const authorityCheckQuery = `
+        SELECT id FROM steward_categories 
+        WHERE steward_id = $1 AND category_id = $2 AND zone_id = $3 AND is_active = true
+      `;
+      
+      const authorityResult = await query(authorityCheckQuery, [stewardId, issue.category_id, issue.zone_id]);
+      
+      if (authorityResult.rows.length === 0) {
+        throw new Error('You do not have authority to assign this issue. You are not assigned to this category in this zone.');
+      }
+      
+      // Assign the issue to the steward
+      const assignQuery = `
+        UPDATE issues 
+        SET assigned_steward_id = $1, 
+            status = CASE WHEN status = 'OPEN' THEN 'ACKNOWLEDGED' ELSE status END,
+            updated_at = NOW()
+        WHERE id = $2
+        RETURNING assigned_steward_id, status
+      `;
+      
+      const assignResult = await query(assignQuery, [stewardId, issueId]);
+      
+      // Create an issue history entry
+      const historyQuery = `
+        INSERT INTO issue_history (issue_id, user_id, old_status, new_status, change_reason)
+        VALUES ($1, $2, $3, $4, $5)
+      `;
+      
+      await query(historyQuery, [
+        issueId, 
+        stewardId, 
+        issue.status, 
+        assignResult.rows[0].status,
+        'Issue assigned to steward'
+      ]);
+      
+      return {
+        isAssigned: true,
+        assignedTo: stewardId,
+        isCurrentSteward: true,
+        previousStatus: issue.status,
+        newStatus: assignResult.rows[0].status,
+        message: 'Issue successfully assigned to you'
+      };
+      
+    } catch (error) {
+      throw new Error(`Error checking/assigning issue: ${error.message}`);
     }
   }
 };
