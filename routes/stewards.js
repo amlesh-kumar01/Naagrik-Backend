@@ -23,10 +23,28 @@ router.get('/applications/me',
 );
 
 // Steward-only routes
-router.get('/zones/me', 
+router.get('/categories/me', 
   authenticateToken,
   requireSteward,
-  stewardController.getMyStewardZones
+  stewardController.getMyStewardCategories
+);
+
+router.get('/issues/me', 
+  authenticateToken,
+  requireSteward,
+  stewardController.getMyStewardIssues
+);
+
+router.get('/issues/attention', 
+  authenticateToken,
+  requireSteward,
+  stewardController.getIssuesRequiringAttention
+);
+
+router.get('/workload/:stewardId?', 
+  authenticateToken,
+  requireSteward,
+  stewardController.getStewardWorkload
 );
 
 router.post('/issues/:issueId/notes', 
@@ -70,22 +88,34 @@ router.get('/',
   stewardController.getAllStewards
 );
 
-router.post('/assignments', 
+router.post('/assignments/category', 
   authenticateToken,
   requireAdmin,
-  stewardController.assignStewardToZone
+  stewardController.assignStewardToCategory
 );
 
-router.delete('/assignments', 
+router.post('/assignments/bulk-categories', 
   authenticateToken,
   requireAdmin,
-  stewardController.removeStewardFromZone
+  stewardController.bulkAssignStewardToCategories
+);
+
+router.delete('/assignments/category', 
+  authenticateToken,
+  requireAdmin,
+  stewardController.removeStewardFromCategory
 );
 
 router.get('/:stewardId/stats', 
   authenticateToken,
   requireAdmin,
   stewardController.getStewardStats
+);
+
+router.get('/:stewardId/categories', 
+  authenticateToken,
+  requireAdmin,
+  stewardController.getStewardCategories
 );
 
 module.exports = router;

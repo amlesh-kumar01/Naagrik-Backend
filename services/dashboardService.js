@@ -105,12 +105,13 @@ const dashboardService = {
           COUNT(DISTINCT ih.issue_id) as issues_handled,
           COUNT(DISTINCT sn.id) as notes_added,
           COUNT(DISTINCT CASE WHEN ih.new_status = 'RESOLVED' THEN ih.issue_id END) as issues_resolved,
-          COUNT(DISTINCT sza.zone_id) as zones_assigned,
+          COUNT(DISTINCT sc.zone_id) as zones_assigned,
+          COUNT(DISTINCT sc.category_id) as categories_assigned,
           COALESCE(AVG(CASE WHEN ih.created_at >= NOW() - INTERVAL '30 days' THEN 1 END), 0) as activity_score
         FROM users u
         LEFT JOIN issue_history ih ON u.id = ih.user_id
         LEFT JOIN steward_notes sn ON u.id = sn.steward_id
-        LEFT JOIN steward_zone_assignments sza ON u.id = sza.user_id
+        LEFT JOIN steward_categories sc ON u.id = sc.steward_id AND sc.is_active = true
         WHERE u.role = 'STEWARD'
         GROUP BY u.id, u.full_name, u.reputation_score
         ORDER BY activity_score DESC, u.reputation_score DESC
@@ -202,19 +203,16 @@ const dashboardService = {
     return await cacheService.cached(cacheKey, async () => {
       const result = await query(`
         SELECT 
-          COUNT(DISTINCT sza.zone_id) as assigned_zones,
-          COUNT(DISTINCT i.id) as zone_issues,
+          COUNT(DISTINCT sc.zone_id) as assigned_zones,
+          COUNT(DISTINCT sc.category_id) as assigned_categories,
+          COUNT(DISTINCT i.id) as manageable_issues,
           COUNT(DISTINCT CASE WHEN i.status IN ('OPEN', 'ACKNOWLEDGED', 'IN_PROGRESS') THEN i.id END) as active_issues,
           COUNT(DISTINCT sn.id) as notes_added,
           COUNT(DISTINCT ih.issue_id) as issues_handled,
-          AVG(i.vote_score) as avg_issue_priority
+          AVG(i.urgency_score) as avg_issue_priority
         FROM users u
-        LEFT JOIN steward_zone_assignments sza ON u.id = sza.user_id
-        LEFT JOIN issues i ON ST_DWithin(
-          ST_SetSRID(ST_MakePoint(i.location_lng, i.location_lat), 4326),
-          ST_SetSRID(ST_MakePoint(-73.9857, 40.7484), 4326),
-          10000
-        )
+        LEFT JOIN steward_categories sc ON u.id = sc.steward_id AND sc.is_active = true
+        LEFT JOIN issues i ON sc.category_id = i.category_id AND sc.zone_id = i.zone_id
         LEFT JOIN steward_notes sn ON u.id = sn.steward_id AND sn.created_at >= NOW() - INTERVAL '30 days'
         LEFT JOIN issue_history ih ON u.id = ih.user_id AND ih.created_at >= NOW() - INTERVAL '30 days'
         WHERE u.id = $1 AND u.role = 'STEWARD'
@@ -223,7 +221,8 @@ const dashboardService = {
       
       return result.rows[0] || {
         assigned_zones: 0,
-        zone_issues: 0,
+        assigned_categories: 0,
+        manageable_issues: 0,
         active_issues: 0,
         notes_added: 0,
         issues_handled: 0,
@@ -239,13 +238,15 @@ const dashboardService = {
     return await cacheService.cached(cacheKey, async () => {
       let query_text = `
         SELECT i.id, i.title, i.description, i.vote_score, i.status, i.created_at,
-               i.location_lat, i.location_lng, i.address,
+               i.location_lat, i.location_lng, i.address, i.urgency_score,
                u.full_name as user_name, ic.name as category_name,
+               z.name as zone_name, z.area_name,
                COUNT(c.id) as comment_count,
                EXTRACT(EPOCH FROM (NOW() - i.created_at))/3600 as hours_old
         FROM issues i
         LEFT JOIN users u ON i.user_id = u.id
         LEFT JOIN issue_categories ic ON i.category_id = ic.id
+        LEFT JOIN zones z ON i.zone_id = z.id
         LEFT JOIN comments c ON i.id = c.issue_id
       `;
       
@@ -254,20 +255,17 @@ const dashboardService = {
       
       if (stewardId) {
         query_text += `
-        INNER JOIN steward_zone_assignments sza ON ST_DWithin(
-          ST_SetSRID(ST_MakePoint(i.location_lng, i.location_lat), 4326),
-          ST_SetSRID(ST_MakePoint(-73.9857, 40.7484), 4326),
-          10000
-        )`;
-        whereClause += ` AND sza.user_id = $1`;
+        INNER JOIN steward_categories sc ON i.category_id = sc.category_id AND i.zone_id = sc.zone_id
+        `;
+        whereClause += ` AND sc.steward_id = $1 AND sc.is_active = true`;
         params.push(stewardId);
       }
       
       query_text += `
         ${whereClause}
-        GROUP BY i.id, u.full_name, ic.name
+        GROUP BY i.id, u.full_name, ic.name, z.name, z.area_name
         HAVING (i.vote_score >= 10 OR EXTRACT(EPOCH FROM (NOW() - i.created_at))/3600 >= 48)
-        ORDER BY i.vote_score DESC, i.created_at ASC
+        ORDER BY i.urgency_score DESC, i.vote_score DESC, i.created_at ASC
         LIMIT 20
       `;
       

@@ -1,27 +1,42 @@
 const express = require('express');
 const router = express.Router();
 const adminZoneController = require('../controllers/adminZoneController');
-const { authenticateToken, requireAdmin } = require('../middleware/auth');
+const { authenticateToken, requireAdmin, optionalAuth } = require('../middleware/auth');
 const { handleValidationErrors } = require('../middleware/errors');
 const { body, param } = require('express-validator');
 
 // Validation middleware
 const createZoneValidation = [
-  body('name').trim().isLength({ min: 1, max: 100 }).withMessage('Zone name is required and must be less than 100 characters'),
-  body('description').optional().trim().isLength({ max: 500 }).withMessage('Description must be less than 500 characters')
+  body('area_name').trim().isLength({ min: 1, max: 100 }).withMessage('Area name is required and must be less than 100 characters'),
+  body('state').trim().isLength({ min: 1, max: 50 }).withMessage('State is required and must be less than 50 characters'),
+  body('pincode').isLength({ min: 6, max: 6 }).withMessage('Pincode must be exactly 6 digits'),
+  body('district').optional().trim().isLength({ max: 50 }).withMessage('District must be less than 50 characters')
 ];
 
 const updateZoneValidation = [
-  param('id').isInt().withMessage('Zone ID must be an integer'),
-  body('name').trim().isLength({ min: 1, max: 100 }).withMessage('Zone name is required and must be less than 100 characters'),
-  body('description').optional().trim().isLength({ max: 500 }).withMessage('Description must be less than 500 characters')
+  param('id').isUUID().withMessage('Zone ID must be a valid UUID'),
+  body('area_name').trim().isLength({ min: 1, max: 100 }).withMessage('Area name is required and must be less than 100 characters'),
+  body('state').trim().isLength({ min: 1, max: 50 }).withMessage('State is required and must be less than 50 characters'),
+  body('pincode').isLength({ min: 6, max: 6 }).withMessage('Pincode must be exactly 6 digits'),
+  body('district').optional().trim().isLength({ max: 50 }).withMessage('District must be less than 50 characters')
 ];
 
 const zoneIdValidation = [
-  param('id').isInt().withMessage('Zone ID must be an integer')
+  param('id').isUUID().withMessage('Zone ID must be a valid UUID')
 ];
 
-// All routes require admin authentication
+// Public routes (for zone selection during issue creation)
+router.get('/public/available', 
+  optionalAuth,
+  adminZoneController.getAvailableZones
+);
+
+router.get('/public/search',
+  optionalAuth,
+  adminZoneController.searchZones
+);
+
+// All admin routes require authentication
 router.use(authenticateToken, requireAdmin);
 
 // Zone management routes

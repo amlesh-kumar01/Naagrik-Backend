@@ -10,32 +10,40 @@ const issueService = {
     const { 
       title, 
       description, 
-      categoryId, 
+      categoryId,
+      zoneId, // NEW: Required zone selection
       locationLat, 
       locationLng, 
       address,
     } = issueData;
     
     // Validate required fields
-    if (!title || !description || !categoryId) {
-      throw new Error('Title, description, and category are required');
+    if (!title || !description || !categoryId || !zoneId) {
+      throw new Error('Title, description, category, and zone are required');
+    }
+    
+    // Verify zone exists
+    const zoneResult = await query('SELECT id FROM zones WHERE id = $1 AND is_active = true', [zoneId]);
+    if (zoneResult.rows.length === 0) {
+      throw new Error('Invalid zone selected');
     }
     
     const result = await transaction(async (client) => {
-      // Create the issue
+      // Create the issue with zone_id
       const issueResult = await client.query(
         `INSERT INTO issues (
-          user_id, category_id, title, description, 
+          user_id, category_id, zone_id, title, description, 
           location_lat, location_lng, address
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7) 
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) 
         RETURNING *`,
-        [userId, categoryId, title, description, locationLat, locationLng, address]
+        [userId, categoryId, zoneId, title, description, locationLat, locationLng, address]
       );
       
       const issue = issueResult.rows[0];
-      // Update user reputation
+      
+      // Update user reputation and issue count
       await client.query(
-        'UPDATE users SET reputation_score = reputation_score + 5 WHERE id = $1',
+        'UPDATE users SET reputation_score = reputation_score + 5, issues_reported = issues_reported + 1 WHERE id = $1',
         [userId]
       );
       
@@ -141,11 +149,9 @@ const issueService = {
     const {
       status,
       categoryId,
+      zoneId, // NEW: Zone filtering
       userId,
-      search,
-      nearLat,
-      nearLng,
-      radius = 50 // km
+      search
     } = filters;
     
     let whereConditions = [];
@@ -164,6 +170,13 @@ const issueService = {
       paramIndex++;
     }
     
+    // NEW: Zone filtering
+    if (zoneId) {
+      whereConditions.push(`i.zone_id = $${paramIndex}`);
+      queryParams.push(zoneId);
+      paramIndex++;
+    }
+    
     if (userId) {
       whereConditions.push(`i.user_id = $${paramIndex}`);
       queryParams.push(userId);
@@ -176,28 +189,9 @@ const issueService = {
       paramIndex++;
     }
     
-    // Location-based filtering (if coordinates provided)
-    let distanceSelect = '';
-    if (nearLat && nearLng) {
-      distanceSelect = `, 
-        (6371 * acos(cos(radians($${paramIndex})) * cos(radians(i.location_lat)) * 
-        cos(radians(i.location_lng) - radians($${paramIndex + 1})) + 
-        sin(radians($${paramIndex})) * sin(radians(i.location_lat)))) AS distance`;
-      
-      whereConditions.push(`
-        (6371 * acos(cos(radians($${paramIndex})) * cos(radians(i.location_lat)) * 
-        cos(radians(i.location_lng) - radians($${paramIndex + 1})) + 
-        sin(radians($${paramIndex})) * sin(radians(i.location_lat)))) <= $${paramIndex + 2}
-      `);
-      
-      queryParams.push(nearLat, nearLng, radius);
-      paramIndex += 3;
-    }
-    
     const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
-    const orderBy = nearLat && nearLng ? 'ORDER BY distance ASC, i.created_at DESC' : 'ORDER BY i.created_at DESC';
     
-    // Get total count (use current queryParams without vote parameters)
+    // Get total count
     const countQuery = `
       SELECT COUNT(*) as total
       FROM issues i
@@ -207,9 +201,9 @@ const issueService = {
     const countResult = await query(countQuery, queryParams);
     const totalCount = parseInt(countResult.rows[0].total);
     
-    // Now add vote parameters for the main query
+    // Add vote parameters for main query
     let voteSelectClause = '';
-    let mainQueryParams = [...queryParams]; // Copy existing params
+    let mainQueryParams = [...queryParams];
     let voteParamIndex = paramIndex;
     
     if (currentUserId) {
@@ -228,6 +222,10 @@ const issueService = {
         u.full_name as user_name,
         u.reputation_score as user_reputation,
         ic.name as category_name,
+        z.name as zone_name,
+        z.area_name,
+        z.pincode,
+        z.type as zone_type,
         (SELECT COUNT(*) FROM comments WHERE issue_id = i.id) as comment_count,
         (SELECT COUNT(*) FROM issue_votes WHERE issue_id = i.id AND vote_type = 1) as upvote_count,
         (SELECT COUNT(*) FROM issue_votes WHERE issue_id = i.id AND vote_type = -1) as downvote_count,
@@ -236,12 +234,12 @@ const issueService = {
         (SELECT media_url FROM issue_media WHERE issue_id = i.id AND moderation_status != 'REJECTED' ORDER BY created_at ASC LIMIT 1) as first_media_url,
         (SELECT media_type FROM issue_media WHERE issue_id = i.id AND moderation_status != 'REJECTED' ORDER BY created_at ASC LIMIT 1) as first_media_type
         ${voteSelectClause}
-        ${distanceSelect}
       FROM issues i
       LEFT JOIN users u ON i.user_id = u.id
       LEFT JOIN issue_categories ic ON i.category_id = ic.id
+      LEFT JOIN zones z ON i.zone_id = z.id
       ${whereClause}
-      ${orderBy}
+      ORDER BY i.created_at DESC
       LIMIT $${voteParamIndex} OFFSET $${voteParamIndex + 1}
     `;
     
@@ -273,12 +271,12 @@ const issueService = {
     };
   },
 
-  // Update issue status
+  // Update issue status (with category-zone permissions)
   async updateIssueStatus(issueId, newStatus, userId, reason = null) {
     const result = await transaction(async (client) => {
-      // Get current issue
+      // Get current issue with zone and category info
       const currentIssueResult = await client.query(
-        'SELECT * FROM issues WHERE id = $1',
+        'SELECT i.*, ic.id as category_id FROM issues i LEFT JOIN issue_categories ic ON i.category_id = ic.id WHERE i.id = $1',
         [issueId]
       );
       
@@ -288,10 +286,34 @@ const issueService = {
       
       const currentIssue = currentIssueResult.rows[0];
       
+      // Check user permissions
+      const user = await userService.findById(userId);
+      if (!user) {
+        throw new Error('User not found');
+      }
+      
+      // Category-zone permission check for stewards
+      if (user.role === 'STEWARD') {
+        const hasAccess = await this.checkStewardCategoryAccess(
+          userId, 
+          currentIssue.category_id, 
+          currentIssue.zone_id, 
+          client
+        );
+        if (!hasAccess) {
+          throw new Error('Access denied: You are not authorized to manage this category in this zone');
+        }
+      }
+      // Super admins can update any issue, citizens cannot update issue status
+      else if (user.role === 'CITIZEN') {
+        throw new Error('Access denied: Citizens cannot update issue status');
+      }
+      
       // Update issue status
       const updateResult = await client.query(
         `UPDATE issues 
-         SET status = $1::issue_status, updated_at = NOW(), resolved_at = CASE WHEN $1::issue_status = 'RESOLVED' THEN NOW() ELSE resolved_at END
+         SET status = $1::issue_status, updated_at = NOW(), 
+             resolved_at = CASE WHEN $1::issue_status = 'RESOLVED' THEN NOW() ELSE resolved_at END
          WHERE id = $2 
          RETURNING *`,
         [newStatus, issueId]
@@ -824,13 +846,58 @@ const issueService = {
     }, 600);
   },
 
-  // Bulk update issue status
+  // Bulk update issue status (with zone-based permissions)
   async bulkUpdateStatus(issueIds, newStatus, userId, reason = null) {
     return await transaction(async (client) => {
+      // Get user role for permission checking
+      const user = await userService.findById(userId);
+      if (!user) {
+        throw new Error('User not found');
+      }
+
+      let issuesQuery = 'SELECT * FROM issues WHERE id = ANY($1)';
+      let queryParams = [issueIds];
+      
+      // For stewards, filter issues to only those in their assigned zones
+      if (user.role === 'STEWARD') {
+        issuesQuery = `
+          SELECT i.* 
+          FROM issues i
+          JOIN zones z ON ST_Contains(z.boundary, ST_Point(i.location_lng, i.location_lat))
+          JOIN steward_zones sz ON z.id = sz.zone_id
+          WHERE i.id = ANY($1) 
+            AND sz.steward_id = $2 
+            AND sz.is_active = true
+        `;
+        queryParams = [issueIds, userId];
+      }
+      // Citizens cannot bulk update issue status
+      else if (user.role === 'CITIZEN') {
+        throw new Error('Access denied: Citizens cannot update issue status');
+      }
+      // SUPER_ADMIN can update any issue (no filtering needed)
+      
+      // Get issues user can access
+      const accessibleIssuesResult = await client.query(issuesQuery, queryParams);
+      const accessibleIssues = accessibleIssuesResult.rows;
+      
+      if (accessibleIssues.length === 0) {
+        throw new Error('No accessible issues found to update');
+      }
+      
+      // Check if steward tried to access unauthorized issues
+      if (user.role === 'STEWARD' && accessibleIssues.length < issueIds.length) {
+        const accessibleIds = accessibleIssues.map(issue => issue.id);
+        const unauthorizedIds = issueIds.filter(id => !accessibleIds.includes(id));
+        throw new Error(`Access denied: You cannot manage ${unauthorizedIds.length} issue(s) outside your assigned zones`);
+      }
+      
+      const accessibleIssueIds = accessibleIssues.map(issue => issue.id);
+      
       // Update issues
       const updateResult = await client.query(
         'UPDATE issues SET status = $1, updated_at = NOW() WHERE id = ANY($2) RETURNING *',
-        [newStatus, issueIds]
+        [newStatus, accessibleIssueIds]
       );
 
       // Add history entries
@@ -846,7 +913,7 @@ const issueService = {
     });
   },
 
-  // Get issues requiring steward attention
+  // Get issues requiring steward attention (only in assigned zones)
   async getIssuesRequiringAttention(stewardId, currentUserId = null) {
     let voteSelectClause = '';
     let queryParams = [stewardId];
@@ -863,7 +930,8 @@ const issueService = {
     const result = await query(`
       SELECT i.*, u.full_name as user_name, ic.name as category_name,
              COUNT(c.id) as comment_count,
-             COUNT(sn.id) as steward_notes_count
+             COUNT(sn.id) as steward_notes_count,
+             z.name as zone_name, z.type as zone_type
              ${voteSelectClause},
              EXTRACT(EPOCH FROM (NOW() - i.created_at))/3600 as hours_old
       FROM issues i
@@ -871,19 +939,17 @@ const issueService = {
       LEFT JOIN issue_categories ic ON i.category_id = ic.id
       LEFT JOIN comments c ON i.id = c.issue_id
       LEFT JOIN steward_notes sn ON i.id = sn.issue_id
-      INNER JOIN steward_zone_assignments sza ON ST_DWithin(
-        ST_SetSRID(ST_MakePoint(i.location_lng, i.location_lat), 4326),
-        ST_SetSRID(ST_MakePoint(-73.9857, 40.7484), 4326),
-        10000
-      )
-      WHERE sza.user_id = $1 
+      JOIN zones z ON ST_Contains(z.boundary, ST_Point(i.location_lng, i.location_lat))
+      JOIN steward_zones sz ON z.id = sz.zone_id
+      WHERE sz.steward_id = $1 
+        AND sz.is_active = true
         AND i.status IN ('OPEN', 'ACKNOWLEDGED', 'IN_PROGRESS')
         AND (
           i.vote_score >= 10 
           OR EXTRACT(EPOCH FROM (NOW() - i.created_at))/3600 >= 48
           OR COUNT(c.id) >= 5
         )
-      GROUP BY i.id, u.full_name, ic.name, sza.user_id
+      GROUP BY i.id, u.full_name, ic.name, z.name, z.type
       ORDER BY i.vote_score DESC, i.created_at ASC
       LIMIT 20
     `, queryParams);
@@ -995,6 +1061,102 @@ const issueService = {
         }
       };
     });
+  },
+
+  // Check steward access to category in specific zone
+  async checkStewardCategoryAccess(stewardId, categoryId, zoneId, client = null) {
+    const queryRunner = client || query;
+    
+    const result = await queryRunner(`
+      SELECT COUNT(*) as count
+      FROM steward_categories sc
+      WHERE sc.steward_id = $1 
+        AND sc.category_id = $2
+        AND sc.zone_id = $3
+        AND sc.is_active = true
+    `, [stewardId, categoryId, zoneId]);
+    
+    return parseInt(result.rows[0].count) > 0;
+  },
+
+  // Get steward's assigned category-zone combinations
+  async getStewardZones(stewardId) {
+    const result = await query(`
+      SELECT DISTINCT z.*, 
+             STRING_AGG(ic.name, ', ') as assigned_categories,
+             COUNT(DISTINCT i.id) as issue_count,
+             COUNT(DISTINCT CASE WHEN i.status = 'OPEN' THEN i.id END) as open_issues,
+             COUNT(DISTINCT CASE WHEN i.status = 'IN_PROGRESS' THEN i.id END) as in_progress_issues
+      FROM zones z
+      JOIN steward_categories sc ON z.id = sc.zone_id
+      JOIN issue_categories ic ON sc.category_id = ic.id
+      LEFT JOIN issues i ON z.id = i.zone_id AND ic.id = i.category_id
+      WHERE sc.steward_id = $1 AND sc.is_active = true
+      GROUP BY z.id, z.name, z.type, z.description, z.area_name, z.pincode, z.created_at, z.updated_at
+      ORDER BY z.name
+    `, [stewardId]);
+    
+    return result.rows;
+  },
+
+  // Mark issue as duplicate (with zone permission check)
+  async markAsDuplicate(issueId, originalIssueId, userId, reason = null) {
+    const result = await transaction(async (client) => {
+      // Get both issues
+      const [issueResult, originalResult] = await Promise.all([
+        client.query('SELECT * FROM issues WHERE id = $1', [issueId]),
+        client.query('SELECT * FROM issues WHERE id = $1', [originalIssueId])
+      ]);
+      
+      if (issueResult.rows.length === 0 || originalResult.rows.length === 0) {
+        throw new Error('One or both issues not found');
+      }
+      
+      const issue = issueResult.rows[0];
+      
+      // Check user permissions
+      const user = await userService.findById(userId);
+      if (!user) {
+        throw new Error('User not found');
+      }
+      
+      // Category-zone permission check for stewards
+      if (user.role === 'STEWARD') {
+        const hasAccess = await this.checkStewardCategoryAccess(
+          userId, 
+          issue.category_id, 
+          issue.zone_id, 
+          client
+        );
+        if (!hasAccess) {
+          throw new Error('Access denied: You are not authorized to manage this category in this zone');
+        }
+      }
+      else if (user.role === 'CITIZEN') {
+        throw new Error('Access denied: Citizens cannot mark issues as duplicates');
+      }
+      // SUPER_ADMIN can mark any issue as duplicate
+      
+      // Update issue
+      const updateResult = await client.query(
+        `UPDATE issues 
+         SET status = 'DUPLICATE'::issue_status, primary_issue_id = $1, updated_at = NOW()
+         WHERE id = $2 
+         RETURNING *`,
+        [originalIssueId, issueId]
+      );
+      
+      // Record in history
+      await client.query(
+        `INSERT INTO issue_history (issue_id, user_id, old_status, new_status, change_reason)
+         VALUES ($1, $2, $3::issue_status, 'DUPLICATE'::issue_status, $4)`,
+        [issueId, userId, issue.status, reason || `Marked as duplicate of issue ${originalIssueId}`]
+      );
+      
+      return updateResult.rows[0];
+    });
+    
+    return result;
   }
 };
 

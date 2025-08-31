@@ -42,34 +42,80 @@ END $$;
 `;
 
 const createUsersTable = `
--- 2. USERS TABLE
+-- 2. USERS TABLE (Enhanced with detailed user information)
 CREATE TABLE IF NOT EXISTS users (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     email TEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL,
     full_name TEXT NOT NULL,
+    phone_number VARCHAR(15), -- Indian phone numbers
+    date_of_birth DATE,
+    gender VARCHAR(20), -- 'Male', 'Female', 'Other', 'Prefer not to say'
+    
+    -- Address Information
+    address_line1 TEXT,
+    address_line2 TEXT,
+    city VARCHAR(100) DEFAULT 'Kharagpur',
+    state VARCHAR(100) DEFAULT 'West Bengal',
+    pincode VARCHAR(10),
+    country VARCHAR(100) DEFAULT 'India',
+    
+    -- User Preferences
+    preferred_language VARCHAR(10) DEFAULT 'en', -- 'en', 'hi', 'bn'
+    notification_preferences JSONB DEFAULT '{"email": true, "sms": false, "push": true}',
+    
+    -- Account Information
     role user_role NOT NULL DEFAULT 'CITIZEN',
     reputation_score INTEGER NOT NULL DEFAULT 0,
     risk_score FLOAT NOT NULL DEFAULT 0.0 CHECK (risk_score >= 0.0 AND risk_score <= 1.0),
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    is_verified BOOLEAN NOT NULL DEFAULT FALSE,
+    verification_token TEXT,
+    password_reset_token TEXT,
+    password_reset_expires TIMESTAMPTZ,
+    
+    -- Social/Professional Information
+    occupation VARCHAR(100),
+    organization VARCHAR(200),
+    bio TEXT,
+    website_url TEXT,
+    social_media JSONB, -- Store social media links as JSON
+    
+    -- App Usage Statistics
+    last_login TIMESTAMPTZ,
+    login_count INTEGER DEFAULT 0,
+    issues_reported INTEGER DEFAULT 0,
+    issues_resolved INTEGER DEFAULT 0,
+    
+    -- Timestamps
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    
+    -- Constraints
+    CONSTRAINT valid_phone CHECK (phone_number IS NULL OR phone_number ~ '^[6-9][0-9]{9}$'),
+    CONSTRAINT valid_email CHECK (email ~ '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$'),
+    CONSTRAINT valid_pincode CHECK (pincode IS NULL OR pincode ~ '^[0-9]{6}$')
 );
 `;
 
 const createIssuesTable = `
--- 3. ISSUES TABLE
+-- 3. ISSUES TABLE (Updated with zone_id)
 CREATE TABLE IF NOT EXISTS issues (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID REFERENCES users(id) ON DELETE SET NULL,
     category_id INTEGER,
+    zone_id UUID NOT NULL REFERENCES zones(id) ON DELETE RESTRICT,
     primary_issue_id UUID REFERENCES issues(id) ON DELETE SET NULL,
     title VARCHAR(255) NOT NULL,
     description TEXT NOT NULL,
     status issue_status NOT NULL DEFAULT 'OPEN',
-    location_lat DECIMAL(10, 8) NOT NULL,
-    location_lng DECIMAL(11, 8) NOT NULL,
+    location_lat DECIMAL(10, 8),
+    location_lng DECIMAL(11, 8),
     address TEXT,
     vote_score INTEGER NOT NULL DEFAULT 0,
+    urgency_score INTEGER NOT NULL DEFAULT 0,
     ai_flag BOOLEAN NOT NULL DEFAULT FALSE,
+    assigned_steward_id UUID REFERENCES users(id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     resolved_at TIMESTAMPTZ
@@ -159,22 +205,38 @@ CREATE TABLE IF NOT EXISTS steward_applications (
 );
 `;
 
-const createAdminZonesTable = `
--- 11. ADMIN_ZONES TABLE
-CREATE TABLE IF NOT EXISTS admin_zones (
-    id SERIAL PRIMARY KEY,
+const createZonesTable = `
+-- 11. ZONES TABLE (Simplified without PostGIS boundaries)
+CREATE TABLE IF NOT EXISTS zones (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     name TEXT NOT NULL,
+    type TEXT NOT NULL DEFAULT 'MUNICIPAL', -- EDUCATIONAL, COMMERCIAL, RESIDENTIAL, INDUSTRIAL, HEALTHCARE, TRANSPORTATION, RECREATIONAL, GOVERNMENT
     description TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    area_name TEXT NOT NULL,
+    pincode VARCHAR(10),
+    city VARCHAR(100) DEFAULT 'Kharagpur',
+    state VARCHAR(100) DEFAULT 'West Bengal',
+    country VARCHAR(100) DEFAULT 'India',
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 `;
 
-const createStewardZoneAssignmentsTable = `
--- 12. STEWARD_ZONE_ASSIGNMENTS TABLE
-CREATE TABLE IF NOT EXISTS steward_zone_assignments (
-    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    zone_id INTEGER NOT NULL REFERENCES admin_zones(id) ON DELETE CASCADE,
-    PRIMARY KEY (user_id, zone_id)
+const createStewardCategoriesTable = `
+-- 12. STEWARD_CATEGORIES TABLE (Category-based assignments)
+CREATE TABLE IF NOT EXISTS steward_categories (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    steward_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    category_id INTEGER NOT NULL REFERENCES issue_categories(id) ON DELETE CASCADE,
+    zone_id UUID NOT NULL REFERENCES zones(id) ON DELETE CASCADE,
+    assigned_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    assigned_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    notes TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(steward_id, category_id, zone_id)
 );
 `;
 
@@ -185,12 +247,28 @@ CREATE TABLE IF NOT EXISTS steward_notes (
     issue_id UUID NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
     steward_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     note TEXT NOT NULL,
+    is_internal BOOLEAN NOT NULL DEFAULT FALSE,
+    priority TEXT DEFAULT 'medium',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+`;
+
+const createIssueActivitiesTable = `
+-- 14. ISSUE_ACTIVITIES TABLE (Track steward actions)
+CREATE TABLE IF NOT EXISTS issue_activities (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    issue_id UUID NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    action_type TEXT NOT NULL, -- 'status_update', 'assignment', 'note_added', 'comment'
+    old_value TEXT,
+    new_value TEXT,
+    notes TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 `;
 
 const createIssueMediaTable = `
--- 14. ISSUE_MEDIA TABLE
+-- 15. ISSUE_MEDIA TABLE
 CREATE TABLE IF NOT EXISTS issue_media (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     issue_id UUID NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
@@ -206,7 +284,7 @@ CREATE TABLE IF NOT EXISTS issue_media (
 `;
 
 const createUserActionsTable = `
--- 15. USER_ACTIONS TABLE
+-- 16. USER_ACTIONS TABLE
 CREATE TABLE IF NOT EXISTS user_actions (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -227,6 +305,9 @@ BEGIN
         ALTER TABLE issues ADD CONSTRAINT fk_issues_category_id 
         FOREIGN KEY (category_id) REFERENCES issue_categories(id) ON DELETE SET NULL;
     END IF;
+    
+    -- zone_id and assigned_steward_id foreign key constraints already exist in table definition
+    
 END $$;
 `;
 
@@ -235,16 +316,38 @@ const createIndexes = `
 CREATE INDEX IF NOT EXISTS idx_issues_user_id ON issues(user_id);
 CREATE INDEX IF NOT EXISTS idx_issues_status ON issues(status);
 CREATE INDEX IF NOT EXISTS idx_issues_category_id ON issues(category_id);
+CREATE INDEX IF NOT EXISTS idx_issues_zone_id ON issues(zone_id);
+CREATE INDEX IF NOT EXISTS idx_issues_assigned_steward ON issues(assigned_steward_id);
 CREATE INDEX IF NOT EXISTS idx_issues_created_at ON issues(created_at);
 CREATE INDEX IF NOT EXISTS idx_issues_location ON issues(location_lat, location_lng);
+CREATE INDEX IF NOT EXISTS idx_issues_urgency_score ON issues(urgency_score DESC);
 CREATE INDEX IF NOT EXISTS idx_comments_issue_id ON comments(issue_id);
 CREATE INDEX IF NOT EXISTS idx_comments_parent_id ON comments(parent_comment_id);
 CREATE INDEX IF NOT EXISTS idx_comments_user_id ON comments(user_id);
 CREATE INDEX IF NOT EXISTS idx_comments_created_at ON comments(created_at);
 CREATE INDEX IF NOT EXISTS idx_issue_votes_issue_id ON issue_votes(issue_id);
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+CREATE INDEX IF NOT EXISTS idx_users_phone ON users(phone_number);
 CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
 CREATE INDEX IF NOT EXISTS idx_users_reputation_score ON users(reputation_score DESC);
+CREATE INDEX IF NOT EXISTS idx_users_active ON users(is_active);
+CREATE INDEX IF NOT EXISTS idx_users_verified ON users(is_verified);
+
+-- Zone and steward category indexes
+CREATE INDEX IF NOT EXISTS idx_zones_active ON zones(is_active);
+CREATE INDEX IF NOT EXISTS idx_zones_type ON zones(type);
+CREATE INDEX IF NOT EXISTS idx_zones_pincode ON zones(pincode);
+CREATE INDEX IF NOT EXISTS idx_steward_categories_steward ON steward_categories(steward_id);
+CREATE INDEX IF NOT EXISTS idx_steward_categories_category ON steward_categories(category_id);
+CREATE INDEX IF NOT EXISTS idx_steward_categories_zone ON steward_categories(zone_id);
+CREATE INDEX IF NOT EXISTS idx_steward_categories_active ON steward_categories(is_active);
+CREATE INDEX IF NOT EXISTS idx_steward_categories_composite ON steward_categories(steward_id, category_id, zone_id);
+
+-- Activity tracking indexes
+CREATE INDEX IF NOT EXISTS idx_issue_activities_issue_id ON issue_activities(issue_id);
+CREATE INDEX IF NOT EXISTS idx_issue_activities_user_id ON issue_activities(user_id);
+CREATE INDEX IF NOT EXISTS idx_issue_activities_action_type ON issue_activities(action_type);
+CREATE INDEX IF NOT EXISTS idx_issue_activities_created_at ON issue_activities(created_at);
 `;
 
 const createTriggers = `
@@ -300,38 +403,23 @@ async function runMigration() {
     console.log('👥 Creating users table...');
     await query(createUsersTable);
     
-    console.log('📂 Creating issue categories table...');
+    console.log('�️ Creating zones table...');
+    await query(createZonesTable);
+    
+    console.log('� Creating issue categories table...');
     await query(createIssueCategoriesTable);
     
-    console.log('📋 Creating issues table...');
+    console.log('� Creating issues table...');
     await query(createIssuesTable);
     
-    console.log('🏆 Creating badges table...');
-    await query(createBadgesTable);
+    console.log('� Creating steward categories table...');
+    await query(createStewardCategoriesTable);
     
-    console.log('🎖️ Creating user badges table...');
-    await query(createUserBadgesTable);
-    
-    console.log('💬 Creating comments table...');
-    await query(createCommentsTable);
-    
-    console.log('🗳️ Creating issue votes table...');
-    await query(createIssueVotesTable);
-    
-    console.log('📜 Creating issue history table...');
-    await query(createIssueHistoryTable);
-    
-    console.log('🛡️ Creating steward applications table...');
-    await query(createStewardApplicationsTable);
-    
-    console.log('🗺️ Creating admin zones table...');
-    await query(createAdminZonesTable);
-    
-    console.log('📍 Creating steward zone assignments table...');
-    await query(createStewardZoneAssignmentsTable);
-    
-    console.log('📝 Creating steward notes table...');
+    console.log('� Creating steward notes table...');
     await query(createStewardNotesTable);
+    
+    console.log('� Creating issue activities table...');
+    await query(createIssueActivitiesTable);
     
     console.log('🖼️ Creating issue media table...');
     await query(createIssueMediaTable);
@@ -339,7 +427,22 @@ async function runMigration() {
     console.log('👤 Creating user actions table...');
     await query(createUserActionsTable);
     
-    console.log('🔗 Adding constraints...');
+    console.log('� Creating comments table...');
+    await query(createCommentsTable);
+    
+    console.log('🗳️ Creating issue votes table...');
+    await query(createIssueVotesTable);
+    
+    console.log('🏆 Creating badges table...');
+    await query(createBadgesTable);
+    
+    console.log('🎖️ Creating user badges table...');
+    await query(createUserBadgesTable);
+    
+    console.log('📋 Creating steward applications table...');
+    await query(createStewardApplicationsTable);
+
+    console.log('�🔗 Adding constraints...');
     await query(addConstraints);
     
     console.log('⚡ Creating indexes...');

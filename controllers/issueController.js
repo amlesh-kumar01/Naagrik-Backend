@@ -32,6 +32,16 @@ const issueController = {
       const userId = req.user.id;
       const uploadedFiles = req.files;
       
+      // Validate required fields including zoneId
+      const { title, description, categoryId, zoneId } = issueData;
+      if (!title || !description || !categoryId || !zoneId) {
+        return res.status(400).json(formatApiResponse(
+          false,
+          null,
+          'Title, description, category, and zone are required'
+        ));
+      }
+      
       // Create the issue first
       const issue = await issueService.createIssue(issueData, userId);
       

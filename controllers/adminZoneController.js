@@ -150,6 +150,51 @@ const adminZoneController = {
     } catch (error) {
       next(error);
     }
+  },
+
+  // Public route: Get available zones for issue creation
+  async getAvailableZones(req, res, next) {
+    try {
+      const zones = await adminZoneService.getAvailableZones();
+      
+      res.json(formatApiResponse(
+        true,
+        { zones },
+        'Available zones retrieved successfully'
+      ));
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  // Public route: Search zones by name, state, or pincode
+  async searchZones(req, res, next) {
+    try {
+      const { q, state, pincode, limit = 20 } = req.query;
+      
+      if (!q && !state && !pincode) {
+        return res.status(400).json(formatApiResponse(
+          false,
+          null,
+          'Search query, state, or pincode is required'
+        ));
+      }
+      
+      const zones = await adminZoneService.searchZones({
+        query: q,
+        state,
+        pincode,
+        limit: parseInt(limit)
+      });
+      
+      res.json(formatApiResponse(
+        true,
+        { zones },
+        'Zone search completed successfully'
+      ));
+    } catch (error) {
+      next(error);
+    }
   }
 };
 

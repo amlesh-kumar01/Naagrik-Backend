@@ -8,16 +8,6 @@ const stewardController = {
       const { justification } = req.body;
       const userId = req.user.id;
       
-      // Check if user already has an application
-      const existingApplication = await stewardService.getApplicationByUserId(userId);
-      if (existingApplication) {
-        return res.status(409).json(formatApiResponse(
-          false,
-          null,
-          'You already have a steward application'
-        ));
-      }
-      
       const application = await stewardService.submitApplication(userId, justification);
       
       res.status(201).json(formatApiResponse(
@@ -35,7 +25,7 @@ const stewardController = {
     try {
       const userId = req.user.id;
       
-      const application = await stewardService.getApplicationByUserId(userId);
+      const application = await stewardService.getMyApplication(userId);
       if (!application) {
         return res.status(404).json(formatApiResponse(
           false,
@@ -103,58 +93,64 @@ const stewardController = {
     }
   },
 
-  // Assign steward to zone (Admin only)
-  async assignStewardToZone(req, res, next) {
+  // Assign steward to category in zone (Admin only)
+  async assignStewardToCategory(req, res, next) {
     try {
-      const { stewardId, zoneId } = req.body;
+      const { stewardId, categoryId, zoneId, notes } = req.body;
+      const adminId = req.user.id;
       
-      const assignment = await stewardService.assignStewardToZone(stewardId, zoneId);
+      const assignment = await stewardService.assignStewardToCategory(
+        stewardId, 
+        categoryId, 
+        zoneId, 
+        adminId, 
+        notes
+      );
       
       res.json(formatApiResponse(
         true,
         { assignment },
-        'Steward assigned to zone successfully'
+        'Steward assigned to category in zone successfully'
       ));
     } catch (error) {
       next(error);
     }
   },
 
-  // Remove steward from zone (Admin only)
-  async removeStewardFromZone(req, res, next) {
+  // Remove steward from category-zone assignment (Admin only)
+  async removeStewardFromCategory(req, res, next) {
     try {
-      const { stewardId, zoneId } = req.body;
+      const { stewardId, categoryId, zoneId } = req.body;
+      const adminId = req.user.id;
       
-      const result = await stewardService.removeStewardFromZone(stewardId, zoneId);
-      if (!result) {
-        return res.status(404).json(formatApiResponse(
-          false,
-          null,
-          'Assignment not found'
-        ));
-      }
+      const result = await stewardService.removeStewardFromCategory(
+        stewardId, 
+        categoryId, 
+        zoneId, 
+        adminId
+      );
       
       res.json(formatApiResponse(
         true,
-        null,
-        'Steward removed from zone successfully'
+        { result },
+        'Steward removed from category assignment successfully'
       ));
     } catch (error) {
       next(error);
     }
   },
 
-  // Get steward's assigned zones
-  async getMyStewardZones(req, res, next) {
+  // Get steward's assigned categories and zones
+  async getMyStewardCategories(req, res, next) {
     try {
       const stewardId = req.user.id;
       
-      const zones = await stewardService.getStewardZones(stewardId);
+      const categories = await stewardService.getStewardCategories(stewardId);
       
       res.json(formatApiResponse(
         true,
-        { zones },
-        'Steward zones retrieved successfully'
+        { categories },
+        'Steward category assignments retrieved successfully'
       ));
     } catch (error) {
       next(error);
@@ -225,6 +221,117 @@ const stewardController = {
         true,
         { stats },
         'Your steward statistics retrieved successfully'
+      ));
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  // Get steward's manageable issues
+  async getMyStewardIssues(req, res, next) {
+    try {
+      const stewardId = req.user.id;
+      const { status, categoryId, zoneId, limit = 50, offset = 0 } = req.query;
+      
+      const filters = {
+        status,
+        categoryId: categoryId ? parseInt(categoryId) : undefined,
+        zoneId,
+        limit: parseInt(limit),
+        offset: parseInt(offset)
+      };
+      
+      const issues = await stewardService.getStewardIssues(stewardId, filters);
+      
+      res.json(formatApiResponse(
+        true,
+        { issues },
+        'Manageable issues retrieved successfully'
+      ));
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  // Get issues requiring steward attention
+  async getIssuesRequiringAttention(req, res, next) {
+    try {
+      const stewardId = req.user.id;
+      const { limit = 20 } = req.query;
+      
+      const issues = await stewardService.getIssuesRequiringAttention(stewardId, parseInt(limit));
+      
+      res.json(formatApiResponse(
+        true,
+        { issues },
+        'Issues requiring attention retrieved successfully'
+      ));
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  // Bulk assign steward to multiple categories in a zone (Admin only)
+  async bulkAssignStewardToCategories(req, res, next) {
+    try {
+      const { stewardId, categoryIds, zoneId, notes } = req.body;
+      const adminId = req.user.id;
+      
+      const result = await stewardService.bulkAssignStewardToCategories(
+        stewardId,
+        categoryIds,
+        zoneId,
+        adminId,
+        notes
+      );
+      
+      res.json(formatApiResponse(
+        true,
+        { result },
+        `Steward assigned to ${result.assigned_count} categories successfully`
+      ));
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  // Get steward workload summary
+  async getStewardWorkload(req, res, next) {
+    try {
+      const stewardId = req.params.stewardId || req.user.id;
+      
+      // If not admin and trying to get other steward's workload, deny
+      if (req.user.role !== 'SUPER_ADMIN' && stewardId !== req.user.id) {
+        return res.status(403).json(formatApiResponse(
+          false,
+          null,
+          'Access denied: You can only view your own workload'
+        ));
+      }
+      
+      const workload = await stewardService.getStewardWorkload(stewardId);
+      
+      res.json(formatApiResponse(
+        true,
+        { workload },
+        'Steward workload retrieved successfully'
+      ));
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  // Get steward categories (Admin only)
+  async getStewardCategories(req, res, next) {
+    try {
+      const { stewardId } = req.params;
+      
+      const categories = await stewardService.getStewardCategories(stewardId);
+      
+      res.json(formatApiResponse(
+        true,
+        { categories },
+        'Steward categories retrieved successfully'
       ));
     } catch (error) {
       next(error);

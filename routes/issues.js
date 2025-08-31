@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const issueController = require('../controllers/issueController');
 const { authenticateToken, requireSteward, requireAdmin, optionalAuth } = require('../middleware/auth');
+const { checkStewardCategoryAccess, checkZoneExists } = require('../middleware/zoneAccess');
 const rateLimitService = require('../services/redis/rateLimitService');
 const { handleValidationErrors } = require('../middleware/errors');
 const {
@@ -114,6 +115,7 @@ router.post('/',
   issueController.uploadMiddleware,  // Process multipart/form-data FIRST
   createIssueValidation,
   handleValidationErrors,
+  checkZoneExists, // Validate zone selection
   issueController.createIssue
 );
 
@@ -188,12 +190,13 @@ router.delete('/media/:mediaId',
   issueController.removeMediaFromIssue
 );
 
-// Steward/Admin only routes
+// Steward/Admin only routes (category access checked in services)
 router.put('/:id/status', 
   authenticateToken,
   requireSteward,
   updateIssueStatusValidation,
   handleValidationErrors,
+  checkStewardCategoryAccess, // Check category access for stewards
   issueController.updateIssueStatus
 );
 
@@ -202,10 +205,11 @@ router.post('/:id/mark-duplicate',
   requireSteward,
   markDuplicateValidation,
   handleValidationErrors,
+  checkStewardCategoryAccess, // Check category access for stewards
   issueController.markAsDuplicate
 );
 
-// Bulk operations (Admin/Steward only)
+// Bulk operations (Admin/Steward only with zone access handled in service)
 router.put('/bulk/status', 
   authenticateToken,
   requireSteward,

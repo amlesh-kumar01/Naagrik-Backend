@@ -5,15 +5,46 @@ const { hashPassword, comparePassword, sanitizeUser, calculateReputationChange }
 const userService = {
   // Create a new user
   async createUser(userData) {
-    const { email, password, fullName, role = 'CITIZEN' } = userData;
+    const { 
+      email, 
+      password, 
+      fullName, 
+      phoneNumber,
+      dateOfBirth,
+      gender,
+      addressLine1,
+      addressLine2,
+      city = 'Kharagpur',
+      state = 'West Bengal',
+      pincode,
+      country = 'India',
+      preferredLanguage = 'en',
+      occupation,
+      organization,
+      bio,
+      websiteUrl,
+      socialMedia,
+      role = 'CITIZEN' 
+    } = userData;
     
     const hashedPassword = await hashPassword(password);
     
     const result = await query(
-      `INSERT INTO users (email, password_hash, full_name, role) 
-       VALUES ($1, $2, $3, $4) 
-       RETURNING id, email, full_name, role, reputation_score, created_at`,
-      [email, hashedPassword, fullName, role]
+      `INSERT INTO users (
+        email, password_hash, full_name, phone_number, date_of_birth, gender,
+        address_line1, address_line2, city, state, pincode, country,
+        preferred_language, occupation, organization, bio, website_url, social_media, role,
+        notification_preferences
+      ) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20) 
+       RETURNING id, email, full_name, phone_number, role, reputation_score, is_verified, created_at`,
+      [
+        email, hashedPassword, fullName, phoneNumber, dateOfBirth, gender,
+        addressLine1, addressLine2, city, state, pincode, country,
+        preferredLanguage, occupation, organization, bio, websiteUrl, 
+        socialMedia ? JSON.stringify(socialMedia) : null, role,
+        '{"email": true, "sms": false, "push": true}'
+      ]
     );
     
     return sanitizeUser(result.rows[0]);
@@ -35,7 +66,13 @@ const userService = {
     
     return await cacheService.cached(cacheKey, async () => {
       const result = await query(
-        'SELECT id, email, full_name, role, reputation_score, created_at FROM users WHERE id = $1',
+        `SELECT 
+          id, email, full_name, phone_number, date_of_birth, gender,
+          address_line1, address_line2, city, state, pincode, country,
+          preferred_language, notification_preferences, occupation, organization, bio,
+          website_url, social_media, role, reputation_score, is_active, is_verified,
+          last_login, login_count, issues_reported, issues_resolved, created_at, updated_at
+         FROM users WHERE id = $1`,
         [id]
       );
       
@@ -434,6 +471,169 @@ const userService = {
     
     const result = await query(query_text, params);
     return result.rows;
+  },
+
+  // Update user profile information
+  async updateUserProfile(userId, profileData) {
+    const {
+      fullName,
+      phoneNumber,
+      dateOfBirth,
+      gender,
+      addressLine1,
+      addressLine2,
+      city,
+      state,
+      pincode,
+      country,
+      preferredLanguage,
+      occupation,
+      organization,
+      bio,
+      websiteUrl,
+      socialMedia,
+      notificationPreferences
+    } = profileData;
+
+    // Build dynamic update query
+    const updates = [];
+    const values = [];
+    let paramIndex = 1;
+
+    if (fullName !== undefined) {
+      updates.push(`full_name = $${paramIndex++}`);
+      values.push(fullName);
+    }
+    if (phoneNumber !== undefined) {
+      updates.push(`phone_number = $${paramIndex++}`);
+      values.push(phoneNumber);
+    }
+    if (dateOfBirth !== undefined) {
+      updates.push(`date_of_birth = $${paramIndex++}`);
+      values.push(dateOfBirth);
+    }
+    if (gender !== undefined) {
+      updates.push(`gender = $${paramIndex++}`);
+      values.push(gender);
+    }
+    if (addressLine1 !== undefined) {
+      updates.push(`address_line1 = $${paramIndex++}`);
+      values.push(addressLine1);
+    }
+    if (addressLine2 !== undefined) {
+      updates.push(`address_line2 = $${paramIndex++}`);
+      values.push(addressLine2);
+    }
+    if (city !== undefined) {
+      updates.push(`city = $${paramIndex++}`);
+      values.push(city);
+    }
+    if (state !== undefined) {
+      updates.push(`state = $${paramIndex++}`);
+      values.push(state);
+    }
+    if (pincode !== undefined) {
+      updates.push(`pincode = $${paramIndex++}`);
+      values.push(pincode);
+    }
+    if (country !== undefined) {
+      updates.push(`country = $${paramIndex++}`);
+      values.push(country);
+    }
+    if (preferredLanguage !== undefined) {
+      updates.push(`preferred_language = $${paramIndex++}`);
+      values.push(preferredLanguage);
+    }
+    if (occupation !== undefined) {
+      updates.push(`occupation = $${paramIndex++}`);
+      values.push(occupation);
+    }
+    if (organization !== undefined) {
+      updates.push(`organization = $${paramIndex++}`);
+      values.push(organization);
+    }
+    if (bio !== undefined) {
+      updates.push(`bio = $${paramIndex++}`);
+      values.push(bio);
+    }
+    if (websiteUrl !== undefined) {
+      updates.push(`website_url = $${paramIndex++}`);
+      values.push(websiteUrl);
+    }
+    if (socialMedia !== undefined) {
+      updates.push(`social_media = $${paramIndex++}`);
+      values.push(JSON.stringify(socialMedia));
+    }
+    if (notificationPreferences !== undefined) {
+      updates.push(`notification_preferences = $${paramIndex++}`);
+      values.push(JSON.stringify(notificationPreferences));
+    }
+
+    if (updates.length === 0) {
+      throw new Error('No fields to update');
+    }
+
+    updates.push(`updated_at = NOW()`);
+    values.push(userId);
+
+    const result = await query(
+      `UPDATE users SET ${updates.join(', ')} WHERE id = $${paramIndex} 
+       RETURNING id, email, full_name, phone_number, date_of_birth, gender,
+       address_line1, address_line2, city, state, pincode, country,
+       preferred_language, notification_preferences, occupation, organization, bio,
+       website_url, social_media, role, reputation_score, updated_at`,
+      values
+    );
+
+    if (result.rows.length === 0) {
+      throw new Error('User not found');
+    }
+
+    // Clear cache
+    const cacheKey = cacheService.generateKey('user', userId);
+    await cacheService.del(cacheKey);
+
+    return sanitizeUser(result.rows[0]);
+  },
+
+  // Verify phone number
+  async verifyPhoneNumber(userId, verificationCode) {
+    // In a real implementation, you'd verify the code against SMS service
+    const result = await query(
+      'UPDATE users SET phone_verified = true, updated_at = NOW() WHERE id = $1 RETURNING *',
+      [userId]
+    );
+
+    if (result.rows.length === 0) {
+      throw new Error('User not found');
+    }
+
+    // Clear cache
+    const cacheKey = cacheService.generateKey('user', userId);
+    await cacheService.del(cacheKey);
+
+    return sanitizeUser(result.rows[0]);
+  },
+
+  // Verify email address
+  async verifyEmail(userId, verificationToken) {
+    const result = await query(
+      `UPDATE users SET is_verified = true, email_verified = true, 
+       verification_token = NULL, updated_at = NOW() 
+       WHERE id = $1 AND verification_token = $2 
+       RETURNING *`,
+      [userId, verificationToken]
+    );
+
+    if (result.rows.length === 0) {
+      throw new Error('Invalid verification token or user not found');
+    }
+
+    // Clear cache
+    const cacheKey = cacheService.generateKey('user', userId);
+    await cacheService.del(cacheKey);
+
+    return sanitizeUser(result.rows[0]);
   }
 };
 

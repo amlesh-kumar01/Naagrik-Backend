@@ -47,6 +47,9 @@ const createIssueValidation = [
   body('categoryId')
     .isInt({ min: 1 })
     .withMessage('Valid category ID is required'),
+  body('zoneId')
+    .isUUID()
+    .withMessage('Valid zone ID is required'),
   body('locationLat')
     .isFloat({ min: -90, max: 90 })
     .withMessage('Valid latitude is required'),

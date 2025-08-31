@@ -79,10 +79,18 @@ const seedSuperAdmin = async () => {
   const hashedPassword = await bcrypt.hash('admin123', 12);
   
   await query(
-    `INSERT INTO users (email, password_hash, full_name, role, reputation_score) 
-     VALUES ($1, $2, $3, $4, $5) 
+    `INSERT INTO users (
+      email, password_hash, full_name, phone_number, role, reputation_score,
+      address_line1, city, state, pincode, country, is_verified, is_active,
+      occupation, organization, preferred_language
+    ) 
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16) 
      ON CONFLICT (email) DO NOTHING`,
-    ['admin@naagrik.com', hashedPassword, 'Super Admin', 'SUPER_ADMIN', 10000]
+    [
+      'admin@naagrik.com', hashedPassword, 'Super Admin', '9876543210', 'SUPER_ADMIN', 10000,
+      'IIT Kharagpur Campus', 'Kharagpur', 'West Bengal', '721302', 'India', true, true,
+      'System Administrator', 'Naagrik Platform', 'en'
+    ]
   );
   
   console.log('✅ Super admin created (email: admin@naagrik.com, password: admin123)');
@@ -92,19 +100,97 @@ const seedDemoUsers = async () => {
   console.log('👥 Creating demo users...');
   
   const demoUsers = [
-    { email: 'citizen1@example.com', name: 'John Doe', role: 'CITIZEN', reputation: 150 },
-    { email: 'citizen2@example.com', name: 'Jane Smith', role: 'CITIZEN', reputation: 280 },
-    { email: 'steward1@example.com', name: 'Mike Johnson', role: 'STEWARD', reputation: 750 },
-    { email: 'steward2@example.com', name: 'Sarah Wilson', role: 'STEWARD', reputation: 620 }
+    { 
+      email: 'citizen1@example.com', 
+      name: 'Rajesh Kumar', 
+      phone: '9876543201',
+      role: 'CITIZEN', 
+      reputation: 150,
+      address: 'Technology Student Gymnasium, IIT Kharagpur',
+      occupation: 'Student',
+      organization: 'IIT Kharagpur',
+      bio: 'Final year Computer Science student at IIT Kharagpur. Active in campus civic issues.',
+      gender: 'Male'
+    },
+    { 
+      email: 'citizen2@example.com', 
+      name: 'Priya Sharma', 
+      phone: '9876543202',
+      role: 'CITIZEN', 
+      reputation: 280,
+      address: 'Nehru Avenue, Kharagpur',
+      occupation: 'Teacher',
+      organization: 'Government High School',
+      bio: 'Passionate about community development and civic engagement.',
+      gender: 'Female'
+    },
+    { 
+      email: 'steward1@example.com', 
+      name: 'Amit Singh', 
+      phone: '9876543203',
+      role: 'STEWARD', 
+      reputation: 750,
+      address: 'Vikramshila Complex, IIT Kharagpur',
+      occupation: 'Municipal Engineer',
+      organization: 'Kharagpur Municipality',
+      bio: 'Experienced municipal engineer specializing in infrastructure and public works.',
+      gender: 'Male'
+    },
+    { 
+      email: 'steward2@example.com', 
+      name: 'Sunita Patel', 
+      phone: '9876543204',
+      role: 'STEWARD', 
+      reputation: 620,
+      address: 'Market Complex, Kharagpur',
+      occupation: 'Public Health Officer',
+      organization: 'West Bengal Health Department',
+      bio: 'Public health professional focused on sanitation and community health initiatives.',
+      gender: 'Female'
+    },
+    { 
+      email: 'citizen3@example.com', 
+      name: 'Arjun Mehta', 
+      phone: '9876543205',
+      role: 'CITIZEN', 
+      reputation: 95,
+      address: 'Railway Colony, Kharagpur',
+      occupation: 'Software Developer',
+      organization: 'Tech Solutions Pvt Ltd',
+      bio: 'Tech enthusiast working to make civic engagement more accessible through technology.',
+      gender: 'Male'
+    },
+    { 
+      email: 'citizen4@example.com', 
+      name: 'Kavya Nair', 
+      phone: '9876543206',
+      role: 'CITIZEN', 
+      reputation: 180,
+      address: 'Scholars Avenue, IIT Kharagpur',
+      occupation: 'Research Scholar',
+      organization: 'IIT Kharagpur',
+      bio: 'PhD researcher in Environmental Sciences with interest in sustainable urban development.',
+      gender: 'Female'
+    }
   ];
 
   for (const user of demoUsers) {
     const hashedPassword = await bcrypt.hash('demo123', 12);
     await query(
-      `INSERT INTO users (email, password_hash, full_name, role, reputation_score) 
-       VALUES ($1, $2, $3, $4, $5) 
+      `INSERT INTO users (
+        email, password_hash, full_name, phone_number, role, reputation_score,
+        address_line1, city, state, pincode, country, is_verified, is_active,
+        occupation, organization, bio, gender, preferred_language,
+        notification_preferences
+      ) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19) 
        ON CONFLICT (email) DO NOTHING`,
-      [user.email, hashedPassword, user.name, user.role, user.reputation]
+      [
+        user.email, hashedPassword, user.name, user.phone, user.role, user.reputation,
+        user.address, 'Kharagpur', 'West Bengal', '721302', 'India', true, true,
+        user.occupation, user.organization, user.bio, user.gender, 'en',
+        '{"email": true, "sms": false, "push": true}'
+      ]
     );
   }
   
