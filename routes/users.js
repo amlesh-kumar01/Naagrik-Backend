@@ -45,6 +45,22 @@ router.get('/search',
   userController.searchUsers
 );
 
+// Current user routes (must come before /:id routes)
+router.get('/profile', 
+  authenticateToken,
+  userController.getCurrentUserProfile
+);
+
+router.get('/stats', 
+  authenticateToken,
+  userController.getCurrentUserStats
+);
+
+router.get('/badges', 
+  authenticateToken,
+  userController.getCurrentUserBadges
+);
+
 router.get('/:id', 
   optionalAuth,
   userController.getUserProfile

@@ -1065,16 +1065,29 @@ const issueService = {
 
   // Check steward access to category in specific zone
   async checkStewardCategoryAccess(stewardId, categoryId, zoneId, client = null) {
-    const queryRunner = client || query;
+    let result;
     
-    const result = await queryRunner(`
-      SELECT COUNT(*) as count
-      FROM steward_categories sc
-      WHERE sc.steward_id = $1 
-        AND sc.category_id = $2
-        AND sc.zone_id = $3
-        AND sc.is_active = true
-    `, [stewardId, categoryId, zoneId]);
+    if (client) {
+      // Inside transaction - use client.query
+      result = await client.query(`
+        SELECT COUNT(*) as count
+        FROM steward_categories sc
+        WHERE sc.steward_id = $1 
+          AND sc.category_id = $2
+          AND sc.zone_id = $3
+          AND sc.is_active = true
+      `, [stewardId, categoryId, zoneId]);
+    } else {
+      // Regular operation - use query function
+      result = await query(`
+        SELECT COUNT(*) as count
+        FROM steward_categories sc
+        WHERE sc.steward_id = $1 
+          AND sc.category_id = $2
+          AND sc.zone_id = $3
+          AND sc.is_active = true
+      `, [stewardId, categoryId, zoneId]);
+    }
     
     return parseInt(result.rows[0].count) > 0;
   },

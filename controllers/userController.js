@@ -67,6 +67,72 @@ const userController = {
     }
   },
 
+  // Get current user profile
+  async getCurrentUserProfile(req, res, next) {
+    try {
+      const userId = req.user.id;
+      
+      const user = await userService.findById(userId);
+      if (!user) {
+        return res.status(404).json(formatApiResponse(
+          false,
+          null,
+          'User not found'
+        ));
+      }
+      
+      // Get user stats and badges
+      const [stats, badges] = await Promise.all([
+        userService.getUserStats(userId),
+        userService.getUserBadges(userId)
+      ]);
+      
+      res.json(formatApiResponse(
+        true,
+        {
+          user: { ...user, stats, badges }
+        },
+        'User profile retrieved successfully'
+      ));
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  // Get current user stats
+  async getCurrentUserStats(req, res, next) {
+    try {
+      const userId = req.user.id;
+      
+      const stats = await userService.getUserStats(userId);
+      
+      res.json(formatApiResponse(
+        true,
+        { stats },
+        'User stats retrieved successfully'
+      ));
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  // Get current user badges
+  async getCurrentUserBadges(req, res, next) {
+    try {
+      const userId = req.user.id;
+      
+      const badges = await userService.getUserBadges(userId);
+      
+      res.json(formatApiResponse(
+        true,
+        { badges },
+        'User badges retrieved successfully'
+      ));
+    } catch (error) {
+      next(error);
+    }
+  },
+
   // Search users
   async searchUsers(req, res, next) {
     try {

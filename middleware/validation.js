@@ -68,7 +68,7 @@ const updateIssueStatusValidation = [
     .isUUID()
     .withMessage('Valid issue ID is required'),
   body('status')
-    .isIn(['OPEN', 'ACKNOWLEDGED', 'IN_PROGRESS', 'RESOLVED', 'ARCHIVED'])
+    .isIn(['OPEN', 'ACKNOWLEDGED', 'IN_PROGRESS', 'RESOLVED', 'ARCHIVED', 'DUPLICATE'])
     .withMessage('Valid status is required'),
   body('reason')
     .optional()

@@ -8,7 +8,7 @@ const checkStewardCategoryAccess = async (req, res, next) => {
       return next();
     }
 
-    const { issueId } = req.params;
+    const { issueId, id } = req.params;
     const { categoryId, zoneId } = req.body;
     
     let targetCategoryId = categoryId;
@@ -16,7 +16,8 @@ const checkStewardCategoryAccess = async (req, res, next) => {
     
     // If no direct category/zone, get from issue
     if (!targetCategoryId || !targetZoneId) {
-      if (issueId) {
+      const actualIssueId = issueId || id; // Handle both :issueId and :id parameter names
+      if (actualIssueId) {
         // Get category and zone from issue
         const issueResult = await query(`
           SELECT i.category_id, i.zone_id, i.title as issue_title,
@@ -25,7 +26,7 @@ const checkStewardCategoryAccess = async (req, res, next) => {
           JOIN issue_categories c ON i.category_id = c.id
           JOIN zones z ON i.zone_id = z.id
           WHERE i.id = $1
-        `, [issueId]);
+        `, [actualIssueId]);
         
         if (issueResult.rows.length === 0) {
           return res.status(404).json({
